@@ -213,7 +213,7 @@
     .canvaswrap .zoomctl{top:auto; bottom:10px; right:auto; left:50%; transform:translateX(-50%);}
     .zoomctl button{min-width:42px; min-height:34px;}
     .histctl button{min-width:38px; min-height:34px;}
-    .hint{bottom:54px;}
+    .hint{display:none;} /* on phones the pinned preview has no spare room — hints are desktop-only */
     .canvaswrap{flex:none; height:40vh; min-height:250px; margin:0 8px 8px; touch-action:none;}
     aside{order:1; width:100% !important; max-width:none; border-right:none;
       padding:10px 10px calc(18px + env(safe-area-inset-bottom)); gap:10px; overflow:visible;}
@@ -569,6 +569,7 @@
       <div class="row" id="rowWall"><label>Surface</label><input type="color" id="wallCol" value="#d9d2c4"></div>
       <div class="row hidden" id="rowBase"><label>Base coat</label><input type="color" id="baseCol" value="#f2ede2"></div>
       <div class="row hidden" id="rowLayerCol"><label>This layer</label><input type="color" id="layerCol" value="#111111"></div>
+      <label class="toggle hidden" id="rowLayerShade"><input type="checkbox" id="layerShade"> Line-shade this sheet <span class="info" data-tip="Renders THIS sheet as line shading instead of solid — thick strokes toward its darker end, thin toward its lighter end. Areas covered by darker sheets stay solid so the layers still can't gap. Pick any sheet with the chips above.">i</span></label>
     </div>
 
     <div class="group" id="gExport">
@@ -608,8 +609,10 @@
       <label class="toggle"><input type="checkbox" id="labelSheets" checked> Label each sheet</label>
       <div class="btnrow">
         <button id="btnSVG" class="primary">SVG</button>
+        <button id="btnEPS">EPS</button>
         <button id="btnPNG">PNG</button>
       </div>
+      <div class="note">PNG previews are free. SVG &amp; EPS cut files unlock with a Pro key.</div>
       <div class="note" id="preflight"></div>
     </div>
     </div>
@@ -1481,9 +1484,30 @@ function pipeline(){
       for(let i=0;i<w*h;i++)if(rank[i]>=kk){cut[i]=1;area++;}
       if(area<40)continue;
       const kCap=kk;
-      // bridge damage: a bridge is invisible where a DARKER sheet will
-      // paint over it (rank>k), mild where the base shows anyway, and
-      // costly only where this sheet's tone is the final visible color
+      /* per-layer line shading: THIS sheet's visible band (rank===k)
+         becomes line strokes, width easing from thick at its darker
+         edge to thin at its lighter edge. Regions that darker sheets
+         will overprint (rank>k) stay solid, so the cumulative
+         no-gaps guarantee holds untouched. */
+      if(state.shadeLayers&&state.shadeLayers[kk]){
+        const g2=state.adjGray;
+        let lo=255,hi2=0;
+        for(let i=0;i<w*h;i++)if(rank[i]===kk){const v=g2[i];if(v<lo)lo=v;if(v>hi2)hi2=v;}
+        const bandR=Math.max(8,hi2-lo);
+        const p2=Math.min(16,Math.max(7,Math.round(w/70)));
+        const rad2=23*Math.PI/180, snx=-Math.sin(rad2), sny=Math.cos(rad2);
+        const minHalf=0.9, maxHalf=p2*0.44;
+        for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+          const i=y*w+x;
+          if(!cut[i]||rank[i]!==kk)continue;
+          const u=(x-w/2)*snx+(y-h/2)*sny;
+          const f=u/p2-Math.round(u/p2);
+          const d=Math.abs(f)*p2;
+          const tt=Math.min(1,Math.max(0,(g2[i]-lo)/bandR)); // 0 dark → 1 light within the band
+          const half=(1-tt)*maxHalf+tt*minHalf;
+          if(d>=half)cut[i]=0;
+        }
+      }
       const sFn=i=>state.rank[i]===kCap?1:(state.rank[i]>kCap?0.06:0.5);
       layers.push(makeLayer(cut,rgbHex(...cent),'tone'+kk,sFn));
     }
@@ -1769,6 +1793,7 @@ function updateModeUI(){
   $('rowWall').classList.toggle('hidden',multi);
   $('rowBase').classList.toggle('hidden',!multi);
   $('rowLayerCol').classList.toggle('hidden',!multi);
+  $('rowLayerShade').classList.toggle('hidden',!multi);
 
   $('rowHl').classList.toggle('hidden',!multi);
   $('layerNote').classList.toggle('hidden',!multi);
@@ -1793,6 +1818,8 @@ function rebuildChips(){
     c.addEventListener('click',()=>{
       state.active=i; rebuildChips();
       $('layerCol').value=L.colorHex;
+      const tm=L.name&&L.name.match(/^tone(\d+)$/);
+      $('layerShade').checked=!!(tm&&state.shadeLayers&&state.shadeLayers[+tm[1]]);
       render();
     });
     el.appendChild(c);
@@ -2662,6 +2689,72 @@ ${body}
 ${regGroupSVG()}</svg>`;
 }
 
+/* ---------- EPS export: PostScript straight from the vectors ---------- */
+const PT_PER_MM=72/25.4;
+function epsHead(abW,abH,what){
+  return '%!PS-Adobe-3.0 EPSF-3.0\n'
+    +'%%BoundingBox: 0 0 '+Math.ceil(abW*PT_PER_MM)+' '+Math.ceil(abH*PT_PER_MM)+'\n'
+    +'%%Creator: Stencil Bot (stencilbot.com)\n%%Title: '+what+'\n%%EndComments\n0 setgray\n';
+}
+function epsRegMarks(abH){
+  if(!$('regmarks').checked)return '';
+  const {size,spots}=regMarkSpots();
+  let b='newpath\n';
+  for(const[cx,cy]of spots){
+    const pts=regCrossPath(cx,cy,size);
+    pts.forEach((p,i)=>{
+      b+=(p[0]*PT_PER_MM).toFixed(2)+' '+((abH-p[1])*PT_PER_MM).toFixed(2)+(i?' lineto\n':' moveto\n');
+    });
+    b+='closepath\n';
+  }
+  return b+'fill\n';
+}
+function buildEPS(layerIndex){
+  const {w}=state, L=state.layers[layerIndex]||state.layers[0];
+  const loops=contoursFor(L);
+  const {abW,abH,awW,tx,ty}=artPlaceMM();
+  const sc=awW/w;
+  let b=epsHead(abW,abH,'stencil sheet '+(layerIndex+1));
+  b+='newpath\n';
+  for(const l of loops){
+    l.forEach((pt,i)=>{
+      b+=((tx+pt[0]*sc)*PT_PER_MM).toFixed(2)+' '
+        +((abH-(ty+pt[1]*sc))*PT_PER_MM).toFixed(2)+(i?' lineto\n':' moveto\n');
+    });
+    b+='closepath\n';
+  }
+  b+='eofill\n'+epsRegMarks(abH)+'%%EOF\n';
+  return b;
+}
+function buildHalftoneEPS(){
+  if(HT.dirty)htGenerate();
+  const {abW,abH,awW,tx,ty}=artPlaceMM();
+  let b=epsHead(abW,abH,'halftone '+$('htPattern').value);
+  if(HT.dots){ // true circles — a laser's favorite food
+    const sc=awW/state.w;
+    for(const[dx,dy,r]of HT.dots){
+      b+='newpath '+((tx+dx*sc)*PT_PER_MM).toFixed(2)+' '
+        +((abH-(ty+dy*sc))*PT_PER_MM).toFixed(2)+' '
+        +(r*sc*PT_PER_MM).toFixed(3)+' 0 360 arc closepath fill\n';
+    }
+  }else{
+    const {W,H}=HT, sc=awW/W;
+    const loops=traceContours(HT.mask,W,H)
+      .map(l=>simplifyDP(l,1.1)).filter(l=>l.length>2).map(l=>chaikin(l,1));
+    b+='newpath\n';
+    for(const l of loops){
+      l.forEach((pt,i)=>{
+        b+=((tx+pt[0]*sc)*PT_PER_MM).toFixed(2)+' '
+          +((abH-(ty+pt[1]*sc))*PT_PER_MM).toFixed(2)+(i?' lineto\n':' moveto\n');
+      });
+      b+='closepath\n';
+    }
+    b+='eofill\n';
+  }
+  b+=epsRegMarks(abH)+'%%EOF\n';
+  return b;
+}
+
 /* ---------- interactions ---------- */
 $('drop').addEventListener('click',()=>$('file').click());
 $('drop').addEventListener('dragover',e=>{e.preventDefault();$('drop').classList.add('over');});
@@ -2877,6 +2970,18 @@ $('bgShift').addEventListener('input',()=>{
 });
 $('showBridges').addEventListener('change',()=>render());
 for(const id of['paintCol','wallCol','baseCol'])$(id).addEventListener('input',()=>render());
+$('layerShade').addEventListener('change',()=>{
+  const L=state.layers[state.active];
+  const tm=L&&L.name&&L.name.match(/^tone(\d+)$/);
+  if(!tm){
+    $('layerShade').checked=false;
+    toast('The highlights sheet can\u2019t be line-shaded \u2014 pick a tone sheet.');
+    return;
+  }
+  state.shadeLayers=state.shadeLayers||{};
+  state.shadeLayers[+tm[1]]=$('layerShade').checked;
+  reRun();
+});
 $('layerCol').addEventListener('input',()=>{
   const L=activeLayer();
   if(L){L.colorHex=$('layerCol').value;rebuildChips();render();}
@@ -3044,14 +3149,13 @@ updateProUI();
 
 /* first-visit guided tour — spotlights each part of the UI */
 const GUIDE=[
-  {t:'Welcome to Stencil Bot',b:'Turn any photo into a cuttable stencil — bridges placed automatically, halftones engineered so nothing falls out. A 30-second tour of where everything lives.',sel:null},
-  {t:'1 · Load your image',b:'Drop a photo here or hit “Try a sample.” Turn on Remove background to work with just your subject — the tolerance slider grows or shrinks the mask.',sel:'#gSource'},
-  {t:'2 · Prep the tones',b:'Click ✦ Optimize levels for an instant high-contrast setup, or shape Blacks, Midtones and Whites by hand. Great stencils are made here first.',sel:'#gLevels'},
-  {t:'3 · Four views',b:'Stencil sheet shows the cut layers with bridges. Painted preview shows the sprayed result. Halftone studio renders lines, dots, and engraver textures. Original is your source.',sel:'.tabs'},
-  {t:'4 · Colors & layers',b:'Slide Colors up and the image separates into stacked poster layers — each its own sheet, sprayed light to dark, impossible to gap.',sel:'#gStencil'},
-  {t:'5 · Bridges',b:'The green marks hold your islands in place. Click one to delete it, use “+ Add bridge” to place your own, and pick a bridging style for more or fewer.',sel:'#gBridges'},
-  {t:'6 · Inspect closely',b:'Scroll to zoom toward your cursor, drag to pan, Fit to reset. Get nose-to-the-glass with line weights before you cut.',sel:'.zoomctl'},
-  {t:'7 · Export & cut',b:'Set the real-world width, then save SVG for laser or Cricut — one labeled file per layer — or PNG for reference. The badge up top confirms everything holds together.',sel:'#gExport'},
+  {t:'Welcome to Stencil Bot',b:'Any photo becomes a cuttable stencil — bridges placed automatically, halftones engineered so nothing falls out. Here\u2019s the 30-second lay of the land.',sel:null},
+  {t:'1 \u00b7 Upload your photo',b:'Drop an image here or hit \u201cTry a sample.\u201d Turn on Remove background and the AI finds your subject and clears everything behind it.',sel:'#gSource'},
+  {t:'2 \u00b7 Pick a style',b:'Six looks, one tap each — classic stencil, poster layers, dots, lines, engraving, or the hybrid line shade. Stencil Bot analyzes your photo and dials every setting in automatically. Then shape the result with the Detail and Darkness dials.',sel:'#gStyle'},
+  {t:'3 \u00b7 Easy or Advanced',b:'Easy keeps it to the essentials. Advanced opens the full studio — levels, thresholds, bridge editing, halftone science, per-layer line shading. Flip between them anytime.',sel:'#modeToggle'},
+  {t:'4 \u00b7 Four views',b:'Stencil sheet shows the cut layers and their bridges. Painted preview shows the sprayed result. Halftone studio is its own engine. Original is your source photo.',sel:'.tabs'},
+  {t:'5 \u00b7 Size & export',b:'Set your artboard and real-world size, add registration marks, then export. PNG previews are free — SVG and EPS cut files unlock with a Pro key.',sel:'#gExport'},
+  {t:'6 \u00b7 Get closer — or way back',b:'Scroll to zoom in and inspect line weights, or zoom far out to see the piece like it\u2019s across the street. Drag to pan, Fit resets.',sel:'.zoomctl'},
 ];
 let gIdx=0;
 function guideRender(){
@@ -3275,6 +3379,24 @@ $('btnSVG').addEventListener('click',()=>{
   });
   toast(state.layers.length>1?`Saving ${state.layers.length} labeled sheets…`:'Saving stencil…');
 });
+$('btnEPS').addEventListener('click',()=>{
+  if(!state.w)return toast('Load an image first.');
+  if(!isPro()){openPaywall();toast('EPS cut files are a Pro feature \u2014 PNG stays free.');return;}
+  if(state.tab==='ht'){
+    download(`stencilbot-halftone-${$('htPattern').value}.eps`,
+      new Blob([buildHalftoneEPS()],{type:'application/postscript'}));
+    toast('Saving halftone EPS\u2026');
+    return;
+  }
+  const flo=state.layers.reduce((s,L)=>s+L.floating,0);
+  if(flo>0&&!confirm('Some pieces are still floating and will fall out when cut. Export anyway?'))return;
+  state.layers.forEach((L,i)=>{
+    setTimeout(()=>{
+      download(layerFileName(i,'eps'),new Blob([buildEPS(i)],{type:'application/postscript'}));
+    },i*350);
+  });
+  toast(state.layers.length>1?`Saving ${state.layers.length} EPS sheets\u2026`:'Saving EPS\u2026');
+});
 $('btnPNG').addEventListener('click',()=>{
   if(!state.w)return toast('Load an image first.');
   if(state.tab==='ht'){
@@ -3286,7 +3408,15 @@ $('btnPNG').addEventListener('click',()=>{
     const cx=c.getContext('2d');
     cx.fillStyle='#fff';cx.fillRect(0,0,c.width,c.height);
     cx.imageSmoothingEnabled=true;cx.imageSmoothingQuality='high';
-    cx.drawImage(htMaskCanvas('#000000'),tx*k,ty*k,awW*k,awH*k);
+    if(HT.dots){ // vector dots: draw exact circles at export resolution
+      const sc=awW*k/state.w;
+      cx.fillStyle='#000';
+      for(const[dx,dy,r]of HT.dots){
+        cx.beginPath();cx.arc(tx*k+dx*sc,ty*k+dy*sc,r*sc,0,7);cx.fill();
+      }
+    }else{
+      cx.drawImage(htMaskCanvas('#000000'),tx*k,ty*k,awW*k,awH*k);
+    }
     c.toBlob(b=>download(`stencilbot-halftone-${$('htPattern').value}.png`,b));
     toast('Saving halftone stencil…');
     return;
@@ -3510,6 +3640,7 @@ function histSnapshot(){
     active:state.active,
     utt:state.userTouchedThresh,
     manual:state.manualByLayer,
+    shadeL:state.shadeLayers||{},
     acts:(state.layers||[]).map(L=>L.bridges.map(b=>b.active?1:0)),
   });
 }
@@ -3550,6 +3681,7 @@ function histApply(snapStr){
     state.userTouchedThresh=s.utt;
     state.active=Math.max(0,s.active|0);
     state.manualByLayer=s.manual||{};
+    state.shadeLayers=s.shadeL||{};
     window._pendingActs=s.acts||null;   // re-applied when the pipeline finishes
     HT.dirty=true;
     clearTimeout(window._htT);
@@ -3637,6 +3769,8 @@ function resetAll(){
   });
   state.userTouchedThresh=false;   // the thresh dispatch above re-flags it
   state.manualByLayer={};
+  state.shadeLayers={};
+  $('layerShade').checked=false;
   state.active=0;
   HT.dirty=true;
   resetView();
