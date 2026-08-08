@@ -844,27 +844,38 @@ function applyLevels(){
    visitor's own browser via ONNX Runtime — no uploads, no API, no cost.
    While it computes (a second or two, once per image) the color-flood
    mask stands in; when it finishes, everything recomputes automatically. */
-/* the AI runtime and model ship WITH the site (no CDN, no third parties):
-   ort.min.js + ort-wasm-simd-threaded.{mjs,wasm} + u2netp.onnx, loaded
-   lazily the first time someone enables Remove background */
-let _ortLoading=null,_aiSession=null,_aiBusy=false;
-function loadOrt(){
-  if(window.ort)return Promise.resolve();
-  if(_ortLoading)return _ortLoading;
-  _ortLoading=new Promise((res,rej)=>{
+/* AI files (runtime + model, ~16MB total) are served from the free
+   jsDelivr CDN off the public GitHub repo — zero Netlify bandwidth.
+   Fallback: same-origin copies (for self-hosted installs), then the
+   color-match method with a clear message. Loaded lazily on first use. */
+const AI_BASES=[
+  'https://cdn.jsdelivr.net/gh/wittigdesignco/stencilbot@main/',
+  ''  // same-origin fallback
+];
+let _aiSession=null,_aiBusy=false;
+function loadOrtFrom(base){
+  return new Promise((res,rej)=>{
+    if(window.ort){res();return;}
     const s=document.createElement('script');
-    s.src='ort.min.js';
-    s.onload=()=>{try{ort.env.wasm.wasmPaths='./';ort.env.wasm.numThreads=1;}catch(e){}res();};
-    s.onerror=()=>{_ortLoading=null;rej(new Error('ort load failed'));};
+    s.src=base+'ort.min.js';
+    s.onload=()=>res();
+    s.onerror=()=>{s.remove();rej(new Error('ort unreachable at '+(base||'site')));};
     document.head.appendChild(s);
   });
-  return _ortLoading;
 }
 async function aiSession(){
   if(_aiSession)return _aiSession;
-  await loadOrt();
-  _aiSession=await ort.InferenceSession.create('u2netp.onnx');
-  return _aiSession;
+  let lastErr;
+  for(const base of AI_BASES){
+    try{
+      await loadOrtFrom(base);
+      try{ort.env.wasm.wasmPaths=base||'./';ort.env.wasm.numThreads=1;}catch(e){}
+      _aiSession=await ort.InferenceSession.create(base+'u2netp.onnx');
+      console.log('Smart AI loaded from '+(base||'this site'));
+      return _aiSession;
+    }catch(e){lastErr=e;}
+  }
+  throw lastErr;
 }
 /* Clean the raw AI probability map and judge whether it's trustworthy.
    Rules that protect the subject:
