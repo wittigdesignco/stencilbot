@@ -424,6 +424,8 @@
   ::-webkit-scrollbar-track{background:rgba(255,255,255,0.04);}
   ::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.18); border:2px solid #101012;}
   ::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,0.3);}
+.canvaswrap.over{outline:2px dashed rgba(255,255,255,.45);outline-offset:-8px}
+
 /* ---------- Cutability panel ---------- */
 #gCutability .row2{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
 #gCutability label{font-size:11px;color:var(--muted,#9a9ab0);display:block}
@@ -672,7 +674,7 @@
       <button data-tab="orig">Original</button>
     </div>
     <div class="canvaswrap" id="wrap">
-      <div id="emptyMsg" style="color:var(--dim);font-size:15px;text-align:center;line-height:1.6">Drop an image or try the sample<br><span style="font-size:12.5px;opacity:.7">Your stencil will appear here</span></div>
+      <div id="emptyMsg" style="color:var(--dim);font-size:15px;text-align:center;line-height:1.6">Tap to upload an image<br><span style="font-size:12.5px;opacity:.7">or drop one here — your stencil appears in seconds</span></div>
       <canvas id="view" style="display:none"></canvas>
       <div class="zoomctl">
         <button id="zoomOut" class="small" title="Zoom out">−</button>
@@ -3114,6 +3116,31 @@ $('file').addEventListener('change',e=>{
 });
 document.body.addEventListener('dragover',e=>e.preventDefault());
 document.body.addEventListener('drop',e=>e.preventDefault());
+/* the big empty artboard is the most inviting tap target — honor it:
+   tapping or dropping there works exactly like the dropzone below */
+{
+  const wrap=$('wrap');
+  wrap.addEventListener('click',e=>{
+    if(state.img)return;                          // only while empty
+    if(e.target.closest('.zoomctl,button'))return;
+    $('file').click();
+  });
+  wrap.addEventListener('dragover',e=>{
+    if(state.img)return;
+    e.preventDefault(); wrap.classList.add('over');
+  });
+  wrap.addEventListener('dragleave',()=>wrap.classList.remove('over'));
+  wrap.addEventListener('drop',e=>{
+    if(state.img)return;
+    e.preventDefault(); wrap.classList.remove('over');
+    const f=e.dataTransfer.files[0];
+    if(f){const r=new FileReader();r.onload=()=>loadImage(r.result);r.readAsDataURL(f);}
+  });
+  const paintCursor=()=>{wrap.style.cursor=state.img?'':'pointer';};
+  paintCursor();
+  const _setImage=setImage;
+  setImage=function(...a){const r=_setImage.apply(this,a);paintCursor();return r;};
+}
 
 const reRun=debounce(recompute,180);
 for(const id of['thresh','smooth','simplify','speck','bwidth','colors']){
