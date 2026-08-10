@@ -22,8 +22,6 @@
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <style>
-
-
   :root{
     /* Black liquid glass */
     --bg:#0a0a0c; --panel:rgba(255,255,255,0.06); --panel2:rgba(255,255,255,0.1);
@@ -424,40 +422,6 @@
   ::-webkit-scrollbar-track{background:rgba(255,255,255,0.04);}
   ::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.18); border:2px solid #101012;}
   ::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,0.3);}
-/* ---------- Cutability panel ---------- */
-#gCutability .row2{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
-#gCutability label{font-size:11px;color:var(--muted,#9a9ab0);display:block}
-#gCutability select{width:100%;margin-top:3px}
-.sb-score-wrap{display:flex;align-items:center;gap:12px;margin:6px 0 8px}
-.sb-score{font-size:44px;font-weight:800;line-height:1;letter-spacing:-1px}
-.sb-grade{font-size:13px;font-weight:700;letter-spacing:.08em}
-.sb-gradenote{font-size:11px;color:var(--muted,#9a9ab0);margin-top:2px}
-.sb-methods{display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap}
-.sb-m{font-size:10px;padding:3px 8px;border-radius:20px;background:rgba(255,255,255,.06);color:var(--muted,#9a9ab0)}
-.sb-m.cur{background:rgba(80,160,255,.18);color:#cfe4ff;font-weight:600}
-#sbWhy summary{font-size:11px;cursor:pointer;color:var(--muted,#9a9ab0);margin-bottom:6px}
-.sb-bk{display:flex;align-items:center;gap:8px;font-size:11px;margin:4px 0}
-.sb-bk span{flex:0 0 96px;color:var(--muted,#9a9ab0)}
-.sb-bk i{display:block;height:5px;border-radius:3px;background:linear-gradient(90deg,#3b82f6,#38e08a);max-width:calc(100% - 130px)}
-.sb-bk b{margin-left:auto;font-size:11px}
-#gCutability .row2 button{width:100%}
-#sbViewBtn.active{background:rgba(80,160,255,.25)}
-.sb-issues{margin-top:10px;display:flex;flex-direction:column;gap:6px;max-height:260px;overflow:auto}
-.sb-issue{border-left:3px solid #888;background:rgba(255,255,255,.04);border-radius:6px;padding:7px 9px;font-size:11px}
-.sb-issue-h b{font-size:10px;letter-spacing:.06em;text-transform:uppercase}
-.sb-issue-m{color:var(--muted,#9a9ab0);margin-top:2px}
-.sb-zoom{margin-top:5px;font-size:10px;padding:2px 10px}
-.sb-clear{font-size:12px;color:#38e08a;padding:6px 2px}
-.sb-more{font-size:10px;color:var(--muted,#9a9ab0);text-align:center}
-
-
-/* ---------- AI row ---------- */
-.sb-ai-row{display:flex;gap:6px;margin-top:10px}
-.sb-ai-row input{flex:1;min-width:0;font-size:12px;padding:7px 10px;border-radius:8px;
-  background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);color:inherit}
-.sb-ai-row input::placeholder{color:rgba(255,255,255,.35)}
-.sb-ai-row button{font-size:12px;padding:7px 14px}
-
 </style>
 </head>
 <body>
@@ -759,249 +723,6 @@
 </footer>
 
 <script>
-
-/* ============================================================
-   StencilBot Cutability™ engine — pure analysis, no DOM.
-   Measure once (sbMeasure), score cheaply per profile (sbScore).
-   Issue objects carry enough info for overlays, cards & repair.
-   ============================================================ */
-
-const SB_CUTTERS = {
-  hand:      {name:'By hand / X-Acto', minFeatureMM:1.5,  minBridgeMM:2.0, cxBudget:150},
-  cricut:    {name:'Cricut',           minFeatureMM:0.9,  minBridgeMM:1.4, cxBudget:300},
-  silhouette:{name:'Silhouette',       minFeatureMM:0.9,  minBridgeMM:1.4, cxBudget:280},
-  laser:     {name:'Laser cutter',     minFeatureMM:0.35, minBridgeMM:0.9, cxBudget:1000},
-  cnc:       {name:'CNC',              minFeatureMM:1.2,  minBridgeMM:1.8, cxBudget:420},
-  other:     {name:'Other',            minFeatureMM:1.0,  minBridgeMM:1.5, cxBudget:320},
-};
-const SB_MATERIALS = {
-  paper:     {name:'Printer paper', fragile:1.55, featureScale:1.0, bridgeScale:1.30},
-  cardstock: {name:'Cardstock',     fragile:1.15, featureScale:1.0, bridgeScale:1.05},
-  mylar:     {name:'Mylar',         fragile:0.80, featureScale:1.0, bridgeScale:0.85},
-  acetate:   {name:'Acetate',       fragile:0.95, featureScale:1.0, bridgeScale:0.95},
-  vinyl:     {name:'Vinyl',         fragile:1.25, featureScale:1.1, bridgeScale:1.10},
-  cardboard: {name:'Cardboard',     fragile:1.00, featureScale:1.6, bridgeScale:1.25},
-  wood:      {name:'Wood',          fragile:0.85, featureScale:1.8, bridgeScale:1.50},
-  metal:     {name:'Metal',         fragile:0.60, featureScale:2.0, bridgeScale:1.60},
-};
-function sbProfile(cutterKey, matKey){
-  const c = SB_CUTTERS[cutterKey] || SB_CUTTERS.other;
-  const m = SB_MATERIALS[matKey]  || SB_MATERIALS.cardstock;
-  return {
-    cutter:cutterKey, material:matKey,
-    name:`${c.name} · ${m.name}`,
-    minFeatureMM:+(c.minFeatureMM*m.featureScale).toFixed(2),
-    minBridgeMM:+(c.minBridgeMM*m.bridgeScale).toFixed(2),
-    fragile:m.fragile, cxBudget:c.cxBudget,
-  };
-}
-
-/* ---------- measurement (profile-independent, run once) ---------- */
-/* env = {w, h, mmPerPx, layers:[{cut, bridges, name}]}               */
-function sbMeasure(env){
-  const {w,h,mmPerPx}=env, n=w*h;
-  const M={mmPerPx, layers:[], perimMM:0, holes:0, bridges:0, cutAreaMM2:0};
-  for(const Le of env.layers){
-    const cut=Le.cut;
-    const LM={name:Le.name, floating:[], bridges:[], thin:[], tinyHoles:[], perimMM:0, holes:0};
-    // 1. floating material islands (post-bridge)
-    {
-      const {comps}=labelComponents(w,h,i=>cut[i]===0,true);
-      for(const c of comps){
-        if(c.border)continue;
-        LM.floating.push({areaMM2:c.area*mmPerPx*mmPerPx,
-                          x:(c.minX+c.maxX)/2, y:(c.minY+c.maxY)/2});
-      }
-    }
-    // 2. bridge geometry
-    for(const b of (Le.bridges||[])){
-      if(!b.active)continue;
-      const widthMM=b.width*mmPerPx, lenMM=b.path.length*mmPerPx;
-      const mid=b.path[Math.floor(b.path.length/2)]||0;
-      LM.bridges.push({id:b.id, widthMM, lenMM, x:mid%w, y:(mid-(mid%w))/w});
-    }
-    // 3. material thickness field: distance from material px to nearest cut px
-    const dt=chamferDT(cut,w,h);                  // chamfer 3-4, px ≈ d/3
-    // 4. cut-hole components: perimeter, per-hole opening size
-    {
-      const {labels,comps}=labelComponents(w,h,i=>cut[i]===1,false);
-      LM.holes=comps.length;
-      const maxIn=new Float32Array(comps.length+2);
-      const dtIn=chamferDT(Uint8Array.from(cut,v=>v?0:1),w,h); // dist from cut px to material
-      let perim=0;
-      for(let i=0;i<n;i++){
-        if(cut[i]!==1)continue;
-        const x=i%w,y=(i-x)/w,id=labels[i];
-        if(id>0&&id<maxIn.length&&dtIn[i]>maxIn[id])maxIn[id]=dtIn[i];
-        if((x<w-1&&cut[i+1]===0)||(x>0&&cut[i-1]===0)||(y<h-1&&cut[i+w]===0)||(y>0&&cut[i-w]===0))perim++;
-      }
-      LM.perimMM=perim*mmPerPx;
-      for(const c of comps){
-        if(c.area<4)continue;
-        const thickMM=(2*maxIn[c.id]/3)*mmPerPx;  // widest opening = 2× max inradius
-        LM.tinyHoles.push({areaMM2:c.area*mmPerPx*mmPerPx, thickMM,
-                           x:(c.minX+c.maxX)/2, y:(c.minY+c.maxY)/2});
-      }
-    }
-    LM.shaded=!!Le.shaded;   // line-shaded sheets are engineered thin — see sbScore
-    // 5. thin material webs (candidate fragile strands) — thickness map from dt
-    if(!Le.shaded){
-      // consider material px whose distance to a cut is small; cluster them
-      const capPx=Math.max(2, 4/mmPerPx);          // ignore > 4 mm — never "thin"
-      const thin=new Uint8Array(n);
-      for(let i=0;i<n;i++) if(cut[i]===0 && dt[i]>0 && (2*dt[i]/3)<capPx) thin[i]=1;
-      const {labels,comps}=labelComponents(w,h,i=>thin[i]===1,false);
-      for(const c of comps){
-        if(c.area< (1.2/mmPerPx)*(1.2/mmPerPx))continue;   // noise floor ~1.2mm²
-        let sum=0,cnt=0;                                    // mean thickness, bbox-scan only
-        for(let y=c.minY;y<=c.maxY;y++)for(let x=c.minX;x<=c.maxX;x++){
-          const i=y*w+x; if(labels[i]===c.id){sum+=2*dt[i]/3;cnt++;}
-        }
-        const thickMM=(sum/Math.max(1,cnt))*mmPerPx;
-        LM.thin.push({areaMM2:c.area*mmPerPx*mmPerPx, thickMM,
-                      elong:(c.area*mmPerPx*mmPerPx)/(thickMM*thickMM||1e-6),
-                      x:(c.minX+c.maxX)/2, y:(c.minY+c.maxY)/2});
-      }
-      LM.thin.sort((a,b)=>a.thickMM-b.thickMM);
-      LM.thin=LM.thin.slice(0,40);
-    }
-    // 6. weak necks: virtually erode the material at small radii; a region
-    //    that detaches hangs on a connection thinner than 2r — physically a
-    //    floating island even though its pixels technically touch the sheet.
-    if(Le.shaded){ LM.necks=[]; } else {
-      LM.necks=[];
-      const seen=[];
-      for(const rMM of [0.4,0.8,1.4]){
-        const rPx=rMM/mmPerPx;
-        if(rPx<1)continue;
-        const thr=rPx*3;                                  // chamfer scale
-        const {labels,comps}=labelComponents(w,h,i=>cut[i]===0&&dt[i]>thr,true);
-        if(!comps.length)continue;
-        let anchor=comps.filter(c=>c.border);
-        if(!anchor.length)anchor=[comps.reduce((a,b)=>a.area>b.area?a:b)];
-        const anchorIds=new Set(anchor.map(c=>c.id));
-        for(const c of comps){
-          if(anchorIds.has(c.id))continue;
-          const areaMM2=c.area*mmPerPx*mmPerPx;
-          if(areaMM2<3)continue;                          // crumbs & spikes
-          let maxT=0;                                     // is this a real blob?
-          for(let y=c.minY;y<=c.maxY;y++)for(let x=c.minX;x<=c.maxX;x++){
-            const i=y*w+x; if(labels[i]===c.id&&dt[i]>maxT)maxT=dt[i];
-          }
-          if((2*maxT/3)*mmPerPx < rMM*2.4)continue;       // strand → fragility covers it
-          const cx=(c.minX+c.maxX)/2, cy=(c.minY+c.maxY)/2;
-          if(seen.some(s=>Math.abs(s.x-cx)<10&&Math.abs(s.y-cy)<10))continue;
-          seen.push({x:cx,y:cy});
-          LM.necks.push({neckMM:+(2*rMM).toFixed(1), areaMM2, x:cx, y:cy, rMM, seed:c.seed});
-        }
-      }
-    }
-    M.perimMM+=LM.perimMM; M.holes+=LM.holes; M.bridges+=LM.bridges.length;
-    M.layers.push(LM);
-  }
-  return M;
-}
-
-/* ---------- scoring + issue generation per production profile ---------- */
-function sbScore(M, profile, artMM){          // artMM = {awW, awH}
-  const issues=[];
-  const mf=profile.minFeatureMM, mb=profile.minBridgeMM;
-  let sIsl=100, sBr=100, sFeat=100, sFrag=100, sCx=100;
-  M.layers.forEach((LM,li)=>{
-    if(LM.shaded){
-      // line-shaded sheets: strips are the intended geometry, not defects.
-      // Islands/bridges/complexity still apply; skip thin/small/neck checks.
-      sFrag=Math.min(sFrag,90);
-      issues.push({type:'line-shade', severity:'difficult', layer:li, x:-1, y:-1,
-        measured:'line-shaded sheet', recommended:'',
-        explanation:'This sheet uses line shading — its strips are engineered to be delicate. Cut slowly and lift carefully.',
-        repair:null});
-    }
-    let neckPen=0;
-    for(const f of LM.floating){
-      sIsl-=Math.min(45, 20+f.areaMM2/8);
-      issues.push({type:'floating-island', severity:'must-fix', layer:li, x:f.x, y:f.y,
-        measured:`${f.areaMM2<100?f.areaMM2.toFixed(0)+' mm²':(f.areaMM2/100).toFixed(1)+' cm²'} piece`,
-        recommended:'connected',
-        explanation:'This piece will fall out when the stencil is cut.',
-        repair:'bridge'});
-    }
-    for(const nk of (LM.necks||[])){
-      if(nk.neckMM > Math.max(mb,mf)*1.1)continue;        // strong enough for this setup
-      const sev = nk.neckMM < mb*0.7 ? 'must-fix' : 'risky';
-      const pen = sev==='must-fix'?30:14;
-      if(neckPen<45){ sIsl -= Math.min(pen, 45-neckPen); neckPen+=pen; }
-      issues.push({type:'weak-connection', severity:sev, layer:li, x:nk.x, y:nk.y,
-        measured:`attached by less than ${nk.neckMM} mm`,
-        recommended:'≥ '+mb.toFixed(1)+' mm',
-        explanation:'This piece hangs on a connection too thin to survive — it will likely detach when cut.',
-        repair:'anchor', neck:nk});
-    }
-    for(const b of LM.bridges){
-      if(b.widthMM<mb){
-        const ratio=b.widthMM/mb;
-        const sev=ratio<0.55?'must-fix':'risky';
-        sBr-=Math.min(30,(1-ratio)*46);
-        issues.push({type:'weak-bridge', severity:sev, layer:li, x:b.x, y:b.y,
-          measured:b.widthMM.toFixed(1)+' mm wide', recommended:'≥ '+mb.toFixed(1)+' mm',
-          explanation:'This connection may tear during cutting or painting.',
-          repair:'widen', bridgeId:b.id});
-      } else if(b.lenMM/b.widthMM>14){
-        sBr-=6;
-        issues.push({type:'long-bridge', severity:'difficult', layer:li, x:b.x, y:b.y,
-          measured:(b.lenMM/b.widthMM).toFixed(0)+':1 length-to-width', recommended:'≤ 14:1',
-          explanation:'A long thin bridge can flex and let paint creep under it.',
-          repair:'widen', bridgeId:b.id});
-      }
-    }
-    for(const t of LM.tinyHoles){
-      if(LM.shaded)break;                                 // slits are the style
-      if(t.thickMM>=mf)continue;
-      const ratio=t.thickMM/mf;
-      const sev=ratio<0.5?'risky':'difficult';
-      sFeat-=Math.min(14, 3+(1-ratio)*10);
-      issues.push({type:'small-detail', severity:sev, layer:li, x:t.x, y:t.y,
-        measured:t.thickMM.toFixed(1)+' mm', recommended:'≥ '+mf.toFixed(1)+' mm',
-        explanation:`This detail is too small for your ${SB_CUTTERS[profile.cutter].name.toLowerCase()} to cut cleanly.`,
-        repair:'fill'});
-    }
-    for(const s of LM.thin){
-      if(s.thickMM>=mf*profile.fragile)continue;
-      const long=s.elong>10;
-      sFrag-=Math.min(long?16:8, (1-s.thickMM/(mf*profile.fragile))*(long?22:11));
-      issues.push({type:long?'fragile-strand':'thin-area', severity:long?'risky':'difficult',
-        layer:li, x:s.x, y:s.y,
-        measured:s.thickMM.toFixed(1)+' mm thick', recommended:'≥ '+(mf*profile.fragile).toFixed(1)+' mm',
-        explanation: long?'This long thin section may tear or curl when the stencil is handled.'
-                         :'This narrow area is delicate — cut it slowly and lift carefully.',
-        repair:'thicken'});
-    }
-  });
-  // complexity: perimeter density + geometry counts, vs the cutter's budget
-  const diag=Math.sqrt(artMM.awW*artMM.awH)||1;
-  const cx = M.perimMM/diag*10 + M.holes*0.6 + M.bridges*1.2;
-  sCx = 100*Math.min(1, profile.cxBudget/Math.max(cx,1));
-  if(sCx<70) issues.push({type:'complexity', severity:sCx<45?'risky':'difficult', layer:-1, x:-1,y:-1,
-      measured:Math.round(cx)+' cut-complexity', recommended:'≤ '+profile.cxBudget,
-      explanation:`This is a demanding cut for ${SB_CUTTERS[profile.cutter].name.toLowerCase()} — expect it to take a while.`,
-      repair:'simplify'});
-  const clamp=v=>Math.max(0,Math.round(v));
-  const parts={islands:clamp(sIsl), bridges:clamp(sBr), features:clamp(sFeat),
-               fragility:clamp(sFrag), complexity:clamp(sCx)};
-  let overall=clamp(0.30*parts.islands+0.20*parts.bridges+0.20*parts.features+
-                    0.15*parts.fragility+0.15*parts.complexity);
-  // a stencil with a piece about to fall out is never "ready to cut",
-  // no matter how clean the rest is
-  if(issues.some(i=>i.severity==='must-fix'))      overall=Math.min(overall,72);
-  else if(issues.some(i=>i.severity==='risky'))    overall=Math.min(overall,88);
-  const order={'must-fix':0,'risky':1,'difficult':2};
-  issues.sort((a,b)=>order[a.severity]-order[b.severity]);
-  const grade= overall>=90?['EXCELLENT','Ready to cut']
-             : overall>=75?['GOOD','Minor issues worth a look']
-             : overall>=60?['FAIR','Fixable — see the issues below']
-             :             ['NEEDS WORK','This will be hard to cut as-is'];
-  return {overall, parts, grade:grade[0], gradeNote:grade[1], issues, profile};
-}
 'use strict';
 /* =========================================================
    Stencil Studio v2 — single-file stencil generator
@@ -1847,40 +1568,6 @@ function processLayer(L,li,r,speck,multi){
     const {labels:cl,comps:cc}=labelComponents(w,h,i=>cut[i]===1,false);
     for(const c of cc)if(c.area<speck)fillComp(cut,cl,c,0,w,h);
   }
-  /* physical floor: trim dead-end material tendrils thinner than any cutter
-     can produce (~0.45 mm). A strand that CONNECTS two solid regions is a
-     neck — kept (Cutability judges those). A dead-end hair just flops and
-     tears, and reads as a floating piece in the preview — remove it. */
-  {
-    const mmPP=physWmm()?physWmm()/w:0;
-    const floorPx=mmPP?0.45/mmPP:1.4;
-    if(floorPx>=1){
-      const mat=new Uint8Array(w*h);
-      for(let i=0;i<w*h;i++)mat[i]=cut[i]===0?1:0;
-      const core=erode(mat,w,h,floorPx/2);
-      const solid=dilate(core,w,h,floorPx/2+1);
-      const tl=new Uint8Array(w*h);
-      for(let i=0;i<w*h;i++)tl[i]=(mat[i]&&!solid[i])?1:0;
-      const {labels:tlab,comps:tcomps}=labelComponents(w,h,i=>tl[i]===1,true);
-      const {labels:slab}=labelComponents(w,h,i=>solid[i]===1&&mat[i]===1,true);
-      for(const tc of tcomps){
-        if(tc.border)continue;                       // margin frame stays
-        const touch=new Set();
-        for(let y=Math.max(0,tc.minY-1);y<=Math.min(h-1,tc.maxY+1);y++)
-          for(let x=Math.max(0,tc.minX-1);x<=Math.min(w-1,tc.maxX+1);x++){
-            const i=y*w+x;
-            if(tlab[i]!==tc.id)continue;
-            for(const j of [i-1,i+1,i-w,i+w])
-              if(j>=0&&j<w*h&&slab[j]>0)touch.add(slab[j]);
-          }
-        if(touch.size<=1){                           // dead end (or isolated hair)
-          for(let y=tc.minY;y<=tc.maxY;y++)for(let x=tc.minX;x<=tc.maxX;x++){
-            const i=y*w+x; if(tlab[i]===tc.id)cut[i]=1;
-          }
-        }
-      }
-    }
-  }
   L.contentArea=0;
   for(let i=0;i<w*h;i++)if(cut[i]===1)L.contentArea++;
   // registration marks (multi-layer): same 3 crosshair holes on every sheet
@@ -1935,7 +1622,7 @@ function findCandidates(L,islandId,K,blocked){
     const [u,ku]=heap.pop();
     if(ku!==dist[u])continue;
     if(found.size>=K&&ku>bestCost*3+20)break;
-    if(ku>(L._costCap||6000))break;
+    if(ku>6000)break;
     const x=u%w,y=(u-x)/w,nb4=[];
     if(x>0)nb4.push(u-1); if(x<w-1)nb4.push(u+1); if(y>0)nb4.push(u-w); if(y<h-1)nb4.push(u+w);
     for(const j of nb4){
@@ -1982,8 +1669,7 @@ function autoBridge(L){
     if(find(e.from)!==find(e.to)){union(e.from,e.to);addBridge(L,e,bw,'auto');}
   }
   let guard=0;
-  const guardMax=islands.length+12;      // every island deserves a rescue attempt
-  while(guard++<guardMax){
+  while(guard++<12){
     const orphans=islands.filter(c=>find(c.id)!==find(0));
     if(!orphans.length)break;
     let done=false;
@@ -1995,12 +1681,7 @@ function autoBridge(L){
     }
     if(!done){
       const isl=orphans[0];
-      let cands=findCandidates(L,isl.id,6,null);
-      if(!cands.length){                  // last resort: pay whatever it costs
-        L._costCap=60000;
-        cands=findCandidates(L,isl.id,6,null);
-        L._costCap=0;
-      }
+      const cands=findCandidates(L,isl.id,6,null);
       let added=false;
       for(const e of cands){
         if(find(e.to)!==find(e.from)){union(e.from,e.to);addBridge(L,e,bw,'auto');added=true;break;}
@@ -2011,29 +1692,15 @@ function autoBridge(L){
   const mode=$('bmode').value;
   if(mode!=='min'){
     const factor=mode==='extra'?0.5:1.0;
-    // rotation-proof slenderness: true width from the distance transform, so
-    // DIAGONAL slivers (whose bounding box looks square) are caught too
-    const dtI=chamferDT(L.cutClean,state.w,state.h);
-    const thickOf=isl=>{
-      let m=0;
-      for(let y=isl.minY;y<=isl.maxY;y++)for(let x=isl.minX;x<=isl.maxX;x++){
-        const i=y*state.w+x;
-        if(L.labels[i]===isl.id&&dtI[i]>m)m=dtI[i];
-      }
-      return Math.max(1,2*m/3);                          // px
-    };
     for(const isl of islands){
       const bw2=+$('bwidth').value;
       const wdt=isl.maxX-isl.minX+1,hgt=isl.maxY-isl.minY+1;
       const maxdim=Math.max(wdt,hgt),aspect=maxdim/Math.max(1,Math.min(wdt,hgt));
-      const tw=thickOf(isl), trueAspect=isl.area/(tw*tw);
-      const needs2=isl.area>factor*180*bw2
-        ||(maxdim>factor*26*bw2&&aspect>2.2)
-        ||((aspect>4||trueAspect>4)&&Math.max(maxdim,isl.area/tw)>10*bw2); // slivers at ANY angle
+      const needs2=isl.area>factor*180*bw2||(maxdim>factor*26*bw2&&aspect>2.2);
       if(!needs2)continue;
-      const first=L.bridges.find(b=>b.comps.includes(isl.id));   // either direction
+      const first=L.bridges.find(b=>b.comps[0]===isl.id);
       if(!first)continue;
-      const a0=first.comps[0]===isl.id?first.path[0]:first.path[first.path.length-1];
+      const a0=first.path[first.path.length-1];
       const ax=a0%state.w,ay=(a0-ax)/state.w;
       const cands=findCandidates(L,isl.id,2,{x:ax,y:ay,r:maxdim*0.45});
       if(cands.length&&cands[0].cost<2200){
@@ -2091,14 +1758,6 @@ function contoursFor(L){
     L._loops=loops;
   }
   return L._loops;
-}
-/* export-time path diet: smoothing (chaikin) multiplies anchor points 2-4x,
-   which bogs down cutting software. Before export, drop every point that
-   deviates less than ~0.1 mm — physically invisible, massively lighter. */
-function exportLoops(loops,pxW,artW){
-  const mmPP=(artW||physWmm())/(pxW||state.w);
-  const eps=Math.min(1.0,Math.max(0.3, mmPP?0.10/mmPP:0.4));
-  return loops.map(l=>simplifyDP(l,eps)).filter(l=>l.length>2);
 }
 function pathFrom(loops){
   const p=new Path2D();
@@ -2434,7 +2093,7 @@ function regCrossPath(cx,cy,size){
 function buildSVG(layerIndex){
   const {w,h}=state;
   const L=state.layers[layerIndex]||state.layers[0];
-  const loops=exportLoops(contoursFor(L));
+  const loops=contoursFor(L);
   const {abW,abH,awW,awH,tx,ty}=artPlaceMM();
   const s=awW/w;
   let d='';
@@ -3006,8 +2665,7 @@ function buildHalftoneSVG(){
     body=HT.dots.map(([cx,cy,r])=>`<circle cx="${cx.toFixed(2)}" cy="${cy.toFixed(2)}" r="${r.toFixed(3)}"/>`).join('');
   }else{
     const loops=traceContours(HT.mask,W,H)
-      .map(l=>simplifyDP(l,1.1)).filter(l=>l.length>2).map(l=>chaikin(l,1))
-      .map(l=>simplifyDP(l,0.8)).filter(l=>l.length>2);   // export diet: smoothing re-thinned
+      .map(l=>simplifyDP(l,1.1)).filter(l=>l.length>2).map(l=>chaikin(l,1));
     let d='';
     for(const l of loops){
       d+='M'+l[0][0].toFixed(1)+' '+l[0][1].toFixed(1);
@@ -3053,7 +2711,7 @@ function epsRegMarks(abH){
 }
 function buildEPS(layerIndex){
   const {w}=state, L=state.layers[layerIndex]||state.layers[0];
-  const loops=exportLoops(contoursFor(L));
+  const loops=contoursFor(L);
   const {abW,abH,awW,tx,ty}=artPlaceMM();
   const sc=awW/w;
   let b=epsHead(abW,abH,'stencil sheet '+(layerIndex+1));
@@ -3082,8 +2740,7 @@ function buildHalftoneEPS(){
   }else{
     const {W,H}=HT, sc=awW/W;
     const loops=traceContours(HT.mask,W,H)
-      .map(l=>simplifyDP(l,1.1)).filter(l=>l.length>2).map(l=>chaikin(l,1))
-      .map(l=>simplifyDP(l,0.8)).filter(l=>l.length>2);   // export diet: smoothing re-thinned
+      .map(l=>simplifyDP(l,1.1)).filter(l=>l.length>2).map(l=>chaikin(l,1));
     b+='newpath\n';
     for(const l of loops){
       l.forEach((pt,i)=>{
@@ -4196,510 +3853,6 @@ window.__stencil={
   setLevels:(b,g,wt)=>{$('lvBlack').value=b;$('lvGamma').value=g;$('lvWhite').value=wt;recompute();},
   recompute,buildSVG,
 };
-/* ============================================================
-   Cutability™ UI — panel, production setup, overlay, repairs.
-   Loads after app.js; hooks updateStats/render non-invasively.
-   ============================================================ */
-const sbCut = { cutter:localStorage.getItem('sbCutter')||'cricut',
-                material:localStorage.getItem('sbMaterial')||'mylar',
-                result:null, view:false, timer:null, busy:false };
-
-/* ---------- panel markup, injected before the Export group ---------- */
-(function sbInjectPanel(){
-  const g=document.createElement('div');
-  g.className='group'; g.id='gCutability';
-  g.innerHTML=`
-    <h3>Cutability</h3>
-    <div class="row2">
-      <label>Cutting with
-        <select id="sbCutter">${Object.entries(SB_CUTTERS).map(([k,v])=>
-          `<option value="${k}">${v.name}</option>`).join('')}</select>
-      </label>
-      <label>Material
-        <select id="sbMaterial">${Object.entries(SB_MATERIALS).map(([k,v])=>
-          `<option value="${k}">${v.name}</option>`).join('')}</select>
-      </label>
-    </div>
-    <div class="sb-score-wrap">
-      <div class="sb-score" id="sbScoreBig">–</div>
-      <div class="sb-score-meta">
-        <div class="sb-grade" id="sbGrade"></div>
-        <div class="sb-gradenote" id="sbGradeNote">Load an image to analyze</div>
-      </div>
-    </div>
-    <div class="sb-methods" id="sbMethods"></div>
-    <details id="sbWhy"><summary>Why this score?</summary>
-      <div class="sb-breakdown" id="sbBreakdown"></div>
-    </details>
-    <div class="row2">
-      <button id="sbViewBtn" class="ghost">Cutability view</button>
-      <button id="sbImproveBtn">✨ Improve</button>
-    </div>
-    <div class="sb-issues" id="sbIssues"></div>`;
-  const exportG=document.getElementById('gExport');
-  exportG.parentNode.insertBefore(g, exportG);
-  $('sbCutter').value=sbCut.cutter; $('sbMaterial').value=sbCut.material;
-  $('sbCutter').addEventListener('change',()=>{sbCut.cutter=$('sbCutter').value;
-    localStorage.setItem('sbCutter',sbCut.cutter); sbRescore();});
-  $('sbMaterial').addEventListener('change',()=>{sbCut.material=$('sbMaterial').value;
-    localStorage.setItem('sbMaterial',sbCut.material); sbRescore();});
-  $('sbViewBtn').addEventListener('click',()=>{
-    sbCut.view=!sbCut.view;
-    $('sbViewBtn').classList.toggle('active',sbCut.view);
-    render();
-  });
-  $('sbImproveBtn').addEventListener('click',sbImprove);
-})();
-
-/* ---------- analysis scheduling ---------- */
-function sbShaded(L){
-  const tm=L.name&&L.name.match(/^tone(\d+)$/);
-  if(tm) return !!(state.shadeLayers&&state.shadeLayers[+tm[1]]);
-  const sm=document.getElementById('shadeMix');
-  return !!(sm&&sm.checked&&state.layers.length===1);
-}
-function sbEnv(){
-  const {awW}=artPlaceMM();
-  return { w:state.w, h:state.h, mmPerPx: awW/state.w,
-    layers: state.layers.map(L=>({cut:L.cutFinal||L.cutClean, bridges:L.bridges,
-                                  name:L.name, shaded:sbShaded(L)})) };
-}
-let sbMeasured=null;
-function sbAnalyzeNow(){
-  if(!state.w||!state.layers.length){sbCut.result=null;sbPaint();return;}
-  try{
-    sbMeasured=sbMeasure(sbEnv());
-    sbRescore();
-  }catch(e){console.warn('cutability:',e);}
-}
-function sbRescore(){
-  if(!sbMeasured){sbPaint();return;}
-  const artMM=artPlaceMM();
-  sbCut.result=sbScore(sbMeasured, sbProfile(sbCut.cutter,sbCut.material), artMM);
-  // quick per-method comparison from the same measurements
-  sbCut.compare=['laser','cricut','hand'].map(c=>({c,
-    s:sbScore(sbMeasured, sbProfile(c,sbCut.material), artMM).overall}));
-  sbPaint();
-  if(sbCut.view)render();
-}
-function sbSchedule(){
-  clearTimeout(sbCut.timer);
-  sbCut.timer=setTimeout(sbAnalyzeNow, 380);
-}
-/* hook: updateStats runs after every pipeline / bridge / artboard change */
-const _sbUpdateStats=updateStats;
-updateStats=function(){ _sbUpdateStats(); sbSchedule(); };
-
-/* ---------- panel painting ---------- */
-const SB_SEV={'must-fix':['#ff5a5a','Must fix'],'risky':['#ffa23e','Risky'],'difficult':['#ffe14d','Difficult']};
-function sbPaint(){
-  const r=sbCut.result;
-  if(!r){ $('sbScoreBig').textContent='–'; $('sbGrade').textContent='';
-    $('sbGradeNote').textContent='Load an image to analyze';
-    $('sbMethods').innerHTML=''; $('sbIssues').innerHTML=''; $('sbBreakdown').innerHTML=''; return; }
-  $('sbScoreBig').textContent=r.overall;
-  $('sbScoreBig').style.color = r.overall>=90?'#38e08a':r.overall>=75?'#a5e04a':r.overall>=60?'#ffd34d':'#ff6b5a';
-  $('sbGrade').textContent=r.grade;
-  $('sbGradeNote').textContent=r.gradeNote+' · '+r.profile.name;
-  $('sbMethods').innerHTML=sbCut.compare.map(m=>
-    `<span class="sb-m${m.c===sbCut.cutter?' cur':''}">${SB_CUTTERS[m.c].name.split(' ')[0]} ${m.s}</span>`).join('');
-  const P=r.parts;
-  $('sbBreakdown').innerHTML=[
-    ['Island integrity',P.islands],['Bridge strength',P.bridges],['Feature size',P.features],
-    ['Fragility',P.fragility],['Cut complexity',P.complexity]].map(([n,v])=>
-    `<div class="sb-bk"><span>${n}</span><i style="width:${v}%"></i><b>${v}</b></div>`).join('');
-  const list=r.issues.slice(0,8);
-  $('sbIssues').innerHTML = list.length? list.map((iss,i)=>{
-    const [col,lab]=SB_SEV[iss.severity];
-    return `<div class="sb-issue" style="border-left-color:${col}">
-      <div class="sb-issue-h"><b>${lab}</b>${state.layers.length>1&&iss.layer>=0?` · sheet ${iss.layer+1}`:''} · ${iss.explanation}</div>
-      <div class="sb-issue-m">${iss.measured}${iss.recommended?' · needs '+iss.recommended:''}</div>
-      ${iss.x>=0?`<button class="sb-zoom" data-i="${i}">Zoom</button>`:''}
-    </div>`;}).join('') + (r.issues.length>8?`<div class="sb-more">+ ${r.issues.length-8} more</div>`:'')
-    : `<div class="sb-clear">✓ No issues found for this setup</div>`;
-  $('sbIssues').querySelectorAll('.sb-zoom').forEach(b=>
-    b.addEventListener('click',()=>sbZoomTo(list[+b.dataset.i])));
-}
-function sbZoomTo(iss){
-  if(state.layers.length>1&&iss.layer>=0&&iss.layer!==state.active){
-    state.active=iss.layer; rebuildChips();               // jump to the right sheet
-  }
-  const v=$('view'); V.z=Math.max(V.z,4);
-  V.px=-V.z*(iss.x/state.w-0.5)*v.offsetWidth;
-  V.py=-V.z*(iss.y/state.h-0.5)*v.offsetHeight;
-  applyView();
-  sbCut.view=true; $('sbViewBtn').classList.add('active'); render();
-}
-
-/* ---------- overlay drawing (wraps render) ---------- */
-const _sbRender=render;
-render=function(){
-  _sbRender();
-  if(!sbCut.view||!sbCut.result||state.tab==='orig')return;
-  const ctx=$('view').getContext('2d');
-  const rad=Math.max(10,state.w*0.02);
-  for(const iss of sbCut.result.issues){
-    if(iss.x<0)continue;
-    if(state.layers.length>1&&iss.layer>=0&&iss.layer!==state.active)continue; // only this sheet's issues
-    const [col]=SB_SEV[iss.severity];
-    ctx.save();
-    ctx.strokeStyle=col; ctx.fillStyle=col+'2e';
-    ctx.lineWidth=Math.max(2,state.w*0.004);
-    ctx.beginPath(); ctx.arc(iss.x,iss.y,rad,0,7); ctx.fill(); ctx.stroke();
-    ctx.restore();
-  }
-};
-
-/* ---------- ✨ Improve Cutability ----------
-   Repairs are SIMULATED first: each strategy runs on copies, gets scored
-   with the real analyzer, and only the winning strategy is applied — so
-   Improve can never lower the score. Fully undo-integrated.            */
-function sbSimFinal(cutClean,bridges,w,h){
-  const cut=cutClean.slice(); const bmap=new Int32Array(w*h);
-  for(const b of bridges){ if(!b.active)continue; const r=b.width/2;
-    for(const i of b.path)stampDisk(cut,bmap,b.id,i,r,w,h); }
-  return cut;
-}
-function sbRepairFill(sim,prof,mmPerPx){          // trim uncuttable details
-  const {w,h}=state, n=w*h; let cnt=0;
-  for(let li=0;li<sim.length;li++){
-    const S=sim[li];
-    if(sbShaded(state.layers[li]||{name:''}))continue;   // never fill shade slits
-    const {labels,comps}=labelComponents(w,h,i=>S.cutClean[i]===1,false);
-    const dtIn=chamferDT(Uint8Array.from(S.cutClean,v=>v?0:1),w,h);
-    const maxIn=new Float32Array(comps.length+2);
-    for(let i=0;i<n;i++){const id=labels[i];
-      if(id>0&&id<maxIn.length&&dtIn[i]>maxIn[id])maxIn[id]=dtIn[i];}
-    for(const c of comps){
-      const thickMM=(2*maxIn[c.id]/3)*mmPerPx, areaMM2=c.area*mmPerPx*mmPerPx;
-      if(thickMM<prof.minFeatureMM*0.92 && areaMM2<80){
-        fillComp(S.cutClean,labels,c,0,w,h); cnt++; }
-    }
-  }
-  return cnt;
-}
-function sbRepairBridge(sim){                      // bridge anything floating
-  const {w,h}=state; let cnt=0;
-  for(let li=0;li<sim.length;li++){
-    const S=sim[li], L=state.layers[li];
-    const {labels,comps}=labelComponents(w,h,i=>S.cutClean[i]===0,true);
-    const tmp={cutClean:S.cutClean, labels, comps, islands:comps.filter(c=>!c.border),
-               bridges:S.bridges, strengthFn:L.strengthFn};
-    const had=S.bridges.length;
-    autoBridge(tmp);
-    cnt+=Math.max(0,S.bridges.length-had);
-  }
-  return cnt;
-}
-function sbRepairWiden(sim,prof,mmPerPx){          // weak bridges → minimum
-  const minPx=prof.minBridgeMM/mmPerPx; let cnt=0;
-  for(const S of sim)for(const b of S.bridges)
-    if(b.active&&b.width<minPx){ b.width=Math.ceil(minPx); cnt++; }
-  return cnt;
-}
-function sbRepairAnchor(sim,prof,mmPerPx){  // bridge pieces hanging by thin necks
-  const {w,h}=state, n=w*h; let cnt=0;
-  const bwPx=Math.max(+$('bwidth').value, Math.ceil(prof.minBridgeMM/mmPerPx));
-  for(let li=0;li<sim.length;li++){
-    const S=sim[li], L=state.layers[li];
-    if(sbShaded(L))continue;                              // strips are the style
-    const cut=sbSimFinal(S.cutClean,S.bridges,w,h);
-    const dt=chamferDT(cut,w,h);
-    for(const rMM of [0.4,0.8,1.4]){
-      if(2*rMM > Math.max(prof.minBridgeMM,prof.minFeatureMM)*1.1)break;
-      const rPx=rMM/mmPerPx; if(rPx<1)continue;
-      const thr=rPx*3;
-      const {labels,comps}=labelComponents(w,h,i=>cut[i]===0&&dt[i]>thr,true);
-      if(!comps.length)continue;
-      let anchor=comps.filter(c=>c.border);
-      if(!anchor.length)anchor=[comps.reduce((a,b)=>a.area>b.area?a:b)];
-      const anchorIds=new Set(anchor.map(c=>c.id));
-      const {labels:matLab}=labelComponents(w,h,i=>cut[i]===0,true);
-      for(const c of comps){
-        if(anchorIds.has(c.id)||c.area*mmPerPx*mmPerPx<3)continue;
-        // region = material near this eroded core; give it a temporary label
-        const core=new Uint8Array(n);
-        for(let y=c.minY;y<=c.maxY;y++)for(let x=c.minX;x<=c.maxX;x++){
-          const i=y*w+x; if(labels[i]===c.id)core[i]=1;
-        }
-        const d2=chamferDT(core,w,h);
-        const BIG=9e6+li;
-        const lab2=matLab.slice();
-        const reach=(rPx+2)*3;
-        for(let i=0;i<n;i++)if(cut[i]===0&&d2[i]<=reach)lab2[i]=BIG;
-        const tmpL={cutClean:cut, labels:lab2, bridges:S.bridges, strengthFn:L.strengthFn};
-        const cands=findCandidates(tmpL,BIG,2,null);
-        if(cands.length){ addBridge(tmpL,cands[0],bwPx,'auto'); cnt++; }
-      }
-      if(cnt)break;                       // one radius pass is enough per attempt
-    }
-  }
-  return cnt;
-}
-function sbRepairThickenAt(sim,prof,mmPerPx){ // grow material ONLY at flagged risky spots
-  const {w,h}=state, n=w*h; let cnt=0;
-  const targets=(sbCut.result?sbCut.result.issues:[]).filter(i=>
-    (i.type==='weak-connection'||i.type==='thin-area'||i.type==='fragile-strand')
-    && i.x>=0 && !sbShaded(state.layers[i.layer]||state.layers[0]));
-  if(!targets.length)return 0;
-  const zoneR=Math.max(8, 7/mmPerPx);                     // ~7 mm repair zone
-  for(let li=0;li<sim.length;li++){
-    const S=sim[li];
-    const mine=targets.filter(t=>t.layer===li);
-    if(!mine.length)continue;
-    const cut=S.cutClean;
-    const dt=chamferDT(cut,w,h);
-    // necks must reach minBridge; thin details must reach minFeature
-    const thrOf=t=>t.type==='weak-connection'?prof.minBridgeMM:prof.minFeatureMM;
-    const maxThr=Math.max(...mine.map(thrOf));
-    const lim=(maxThr*0.98/mmPerPx)*3/2;
-    const thin=new Uint8Array(n);
-    for(let i=0;i<n;i++)if(cut[i]===0&&dt[i]>0&&dt[i]<lim)thin[i]=1;
-    const d3=chamferDT(thin,w,h);
-    let changed=0;
-    for(const t of mine){
-      const grow=(thrOf(t)*0.55/mmPerPx)*3;               // grow past the threshold
-      const x0=Math.max(0,t.x-zoneR|0), x1=Math.min(w-1,t.x+zoneR|0);
-      const y0=Math.max(0,t.y-zoneR|0), y1=Math.min(h-1,t.y+zoneR|0);
-      for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){
-        const i=y*w+x;
-        if(cut[i]===1&&d3[i]<=grow){cut[i]=0;changed++;}
-      }
-    }
-    if(changed)cnt+=mine.length;
-  }
-  return cnt;
-}
-function sbRepairThicken(sim,prof,mmPerPx){ // grow material where it's too thin (global)
-  const {w,h}=state, n=w*h; let cnt=0;
-  for(let li=0;li<sim.length;li++){
-    const S=sim[li];
-    if(sbShaded(state.layers[li]||{name:''}))continue;    // never fill shade slits
-    const cut=S.cutClean;
-    const dt=chamferDT(cut,w,h);
-    const lim=(prof.minFeatureMM*0.95/mmPerPx)*3/2;       // half-thickness, chamfer
-    const thin=new Uint8Array(n);
-    for(let i=0;i<n;i++)if(cut[i]===0&&dt[i]>0&&dt[i]<lim)thin[i]=1;
-    const {comps}=labelComponents(w,h,i=>thin[i]===1,false);
-    const real=comps.filter(c=>c.area*mmPerPx*mmPerPx>=1.2);
-    if(!real.length)continue;
-    const d3=chamferDT(thin,w,h);
-    const grow=(prof.minFeatureMM/2/mmPerPx)*3;
-    let changed=0;
-    for(let i=0;i<n;i++)if(cut[i]===1&&d3[i]<=grow){cut[i]=0;changed++;}
-    if(changed)cnt+=real.length;
-  }
-  return cnt;
-}
-function sbImprove(){
-  if(!sbCut.result||!state.layers.length||sbCut.busy)return;
-  sbCut.busy=true;
-  try{
-    const prof=sbProfile(sbCut.cutter,sbCut.material);
-    const {awW,awH}=artPlaceMM(); const mmPerPx=awW/state.w;
-    const artMM={awW,awH};
-    const scoreOf=sim=>sbScore(sbMeasure({w:state.w,h:state.h,mmPerPx,
-      layers:sim.map((S,i)=>({cut:sbSimFinal(S.cutClean,S.bridges,state.w,state.h),
-                              bridges:S.bridges,name:state.layers[i].name}))}),prof,artMM).overall;
-    const snap=()=>state.layers.map(L=>({cutClean:L.cutClean.slice(),
-      bridges:L.bridges.map(b=>({...b}))}));
-    const before=sbCut.result.overall;
-    // strategies, strongest first; each simulated independently from a fresh copy
-    const strategies=[
-      {name:'target',  run:s=>({fill:0, add:sbRepairAnchor(s,prof,mmPerPx), wide:sbRepairWiden(s,prof,mmPerPx), thick:sbRepairThickenAt(s,prof,mmPerPx)})},
-      {name:'full',    run:s=>({fill:sbRepairFill(s,prof,mmPerPx), add:sbRepairBridge(s)+sbRepairAnchor(s,prof,mmPerPx), wide:sbRepairWiden(s,prof,mmPerPx), thick:sbRepairThickenAt(s,prof,mmPerPx)})},
-      {name:'anchor',  run:s=>({fill:0, add:sbRepairAnchor(s,prof,mmPerPx), wide:sbRepairWiden(s,prof,mmPerPx), thick:0})},
-      {name:'thicken', run:s=>({fill:0, add:0, wide:0, thick:sbRepairThicken(s,prof,mmPerPx)})},
-      {name:'full+th', run:s=>({thick:sbRepairThicken(s,prof,mmPerPx), fill:sbRepairFill(s,prof,mmPerPx), add:sbRepairBridge(s)+sbRepairAnchor(s,prof,mmPerPx), wide:sbRepairWiden(s,prof,mmPerPx)})},
-      {name:'fill+add',run:s=>({fill:sbRepairFill(s,prof,mmPerPx), add:sbRepairBridge(s), wide:0, thick:0})},
-      {name:'widen',   run:s=>({fill:0, add:0, wide:sbRepairWiden(s,prof,mmPerPx), thick:0})},
-      {name:'fill',    run:s=>({fill:sbRepairFill(s,prof,mmPerPx), add:0, wide:0, thick:0})},
-    ];
-    let best=null;
-    for(const st of strategies){
-      const sim=snap();
-      const acts=st.run(sim);
-      if(!acts.fill&&!acts.add&&!acts.wide&&!acts.thick)continue;
-      const sc=scoreOf(sim);
-      if(sc>before&&(!best||sc>best.sc)) best={sim,acts,sc};
-    }
-    if(!best){
-      const remaining=sbCut.result.issues;
-      const kinds=[...new Set(remaining.map(i=>i.type))];
-      toast(remaining.length
-        ? `The remaining ${remaining.length===1?'issue':remaining.length+' issues'} (${kinds.join(', ').replace(/-/g,' ')}) can't be auto-fixed without hurting the artwork — adjust manually, simplify the style, or pick a finer cutter.`
-        : `Already at its best for ${prof.name}.`);
-      return;
-    }
-    // apply the winner to the real layers
-    state.layers.forEach((L,i)=>{
-      L.cutClean=best.sim[i].cutClean;
-      L.bridges=best.sim[i].bridges;
-      const {labels,comps}=labelComponents(state.w,state.h,i2=>L.cutClean[i2]===0,true);
-      L.labels=labels; L.comps=comps; L.islands=comps.filter(c=>!c.border);
-      stampBridges(L);
-    });
-    render(); updateStats(); histMark();
-    sbAnalyzeNow();
-    const a=best.acts, bits=[];
-    if(a.wide)bits.push(`${a.wide} bridge${a.wide>1?'s':''} widened`);
-    if(a.fill)bits.push(`${a.fill} fragile detail${a.fill>1?'s':''} removed`);
-    if(a.add)bits.push(`${a.add} bridge${a.add>1?'s':''} added`);
-    if(a.thick)bits.push(`${a.thick} thin area${a.thick>1?'s':''} thickened`);
-    toast(`Cutability ${before} → ${best.sc} · ${bits.join(' · ')} (Undo to revert)`);
-  } finally { sbCut.busy=false; }
-}
-/* expose for tests */
-window.__sbCut={analyze:sbAnalyzeNow, get:()=>sbCut.result, improve:sbImprove,
-                set:(c,m)=>{sbCut.cutter=c;sbCut.material=m;
-                            $('sbCutter').value=c;$('sbMaterial').value=m;sbRescore();}};
-
-
-/* ============================================================
-   AI intelligence layer — plans from the stencilbot-ai Worker,
-   executed by the existing repair machinery, score-gated so the
-   AI can never make the stencil worse. Falls back to the pure
-   algorithmic Improve when no endpoint is configured/reachable.
-   ============================================================ */
-const SB_AI = {
-  url: (localStorage.getItem('sbAiUrl')||'https://stencilbot-ai.jeremywittig.workers.dev').trim(),
-  busy:false, usesLeftFree:3, imgTag:null,
-};
-const SB_AI_PARAM_IDS=['thresh','smooth','simplify','bwidth','colors','bgTol'];
-
-function sbAiQuotaOK(){
-  if(typeof isPro==='function'&&isPro())return true;
-  if(SB_AI.imgTag!==state.img){SB_AI.imgTag=state.img;SB_AI.usesLeftFree=3;}
-  return SB_AI.usesLeftFree>0;
-}
-function sbAiParams(){
-  const out={};
-  for(const id of SB_AI_PARAM_IDS){
-    const el=document.getElementById(id);
-    if(el)out[id]={value:+el.value, min:+el.min||0, max:+el.max||(+el.value*2||100)};
-  }
-  return out;
-}
-function sbAiPreview(){
-  if(!state.img)return null;
-  const c=document.createElement('canvas');
-  const s=Math.min(1,384/Math.max(state.img.width,state.img.height));
-  c.width=Math.max(1,state.img.width*s|0); c.height=Math.max(1,state.img.height*s|0);
-  c.getContext('2d').drawImage(state.img,0,0,c.width,c.height);
-  return c.toDataURL('image/png').split(',')[1];
-}
-async function sbAiPlan(kind,instruction){
-  const r=sbCut.result;
-  const issues=(r?r.issues:[]).slice(0,60).map(i=>({
-    type:i.type, severity:i.severity, layer:i.layer,
-    x:i.x>=0?+(i.x/state.w).toFixed(3):-1, y:i.y>=0?+(i.y/state.h).toFixed(3):-1,
-    measured:i.measured, recommended:i.recommended}));
-  const resp=await fetch(SB_AI.url,{method:'POST',headers:{'content-type':'application/json'},
-    body:JSON.stringify({kind,instruction,issues,params:sbAiParams(),
-      profile:r?r.profile:sbProfile(sbCut.cutter,sbCut.material),
-      score:r?r.overall:null, image:sbAiPreview()})});
-  if(!resp.ok)throw new Error('AI endpoint '+resp.status);
-  const data=await resp.json();
-  if(!data.plan)throw new Error(data.error||'no plan');
-  return data.plan;
-}
-function sbAiProtectFilter(plan){
-  // convert protect zones to px and filter targeted-repair candidates
-  return (plan.protect||[]).map(p=>({x:p.x*state.w,y:p.y*state.h,
-    r:Math.max(0.02,+p.r||0.05)*Math.max(state.w,state.h)}));
-}
-async function sbAiWaitPipeline(){
-  const t0=Date.now();
-  while(Date.now()-t0<25000){
-    if(window.__stencil&&window.__stencil.pipelineDone&&window.__stencil.pipelineDone())
-      {await new Promise(r=>setTimeout(r,450));return;}
-    await new Promise(r=>setTimeout(r,120));
-  }
-}
-async function sbAiRun(kind,instruction){
-  if(SB_AI.busy)return;
-  if(!SB_AI.url){ if(kind==='edit')toast('AI isn’t connected yet — coming with the AI update.');
-                  else sbImprove(); return; }
-  if(!sbAiQuotaOK()){toast('Free AI limit reached for this image — Pro unlocks unlimited AI edits.');
-                     if(kind!=='edit')sbImprove(); return;}
-  SB_AI.busy=true;
-  const btn=$('sbImproveBtn'); const old=btn.textContent;
-  btn.textContent='✨ Thinking…'; btn.disabled=true;
-  try{
-    // full snapshot so the WHOLE plan is revertible as one unit
-    const snapParams={}; for(const id of SB_AI_PARAM_IDS){const el=document.getElementById(id);if(el)snapParams[id]=el.value;}
-    const before=sbCut.result?sbCut.result.overall:0;
-    const plan=await sbAiPlan(kind,instruction);
-    if(typeof isPro==='function'&&!isPro())SB_AI.usesLeftFree--;
-    // 1. parameter changes (whitelisted, clamped, undoable via normal history)
-    let paramTouched=false;
-    for(const [id,v] of Object.entries(plan.param_changes||{})){
-      const el=document.getElementById(id);
-      if(!el||!SB_AI_PARAM_IDS.includes(id)||!isFinite(v))continue;
-      const nv=Math.min(+el.max||1e9,Math.max(+el.min||-1e9,Math.round(+v)));
-      if(String(nv)!==String(el.value)){el.value=nv;el.dispatchEvent(new Event('input'));paramTouched=true;}
-    }
-    if(paramTouched){await sbAiWaitPipeline(); sbAnalyzeNow();}
-    // 2. mechanical repairs through the existing simulated, score-gated engine
-    SB_AI.protect=sbAiProtectFilter(plan);
-    if((plan.repairs||[]).length) sbImprove();
-    SB_AI.protect=null;
-    await new Promise(r=>setTimeout(r,600));
-    sbAnalyzeNow();
-    const after=sbCut.result?sbCut.result.overall:before;
-    if(after<before){                                   // hard guarantee: revert
-      for(const [id,v] of Object.entries(snapParams)){
-        const el=document.getElementById(id);
-        if(el&&String(el.value)!==String(v)){el.value=v;el.dispatchEvent(new Event('input'));}
-      }
-      await sbAiWaitPipeline(); sbAnalyzeNow();
-      toast('AI plan didn’t beat the current setup — reverted. '+(plan.analysis||''));
-    } else {
-      toast((plan.analysis||'Done.')+` · Cutability ${before} → ${after} (Undo to revert)`);
-    }
-  }catch(e){
-    console.warn('ai:',e);
-    if(kind!=='edit'){toast('AI unavailable — used the built-in optimizer instead.');sbImprove();}
-    else toast('AI request failed: '+e.message);
-  }finally{
-    SB_AI.busy=false; btn.textContent=old; btn.disabled=false;
-  }
-}
-/* ---------- UI: NL edit box + AI-aware Improve ---------- */
-(function sbAiInject(){
-  const host=document.getElementById('gCutability');
-  if(!host)return;
-  const row=document.createElement('div');
-  row.className='sb-ai-row';
-  row.innerHTML=`<input id="sbAiAsk" type="text" maxlength="240"
-      placeholder="Tell StencilBot what to change…">
-    <button id="sbAiGo">Ask</button>`;
-  host.appendChild(row);
-  const go=()=>{const v=$('sbAiAsk').value.trim(); if(v){sbAiRun('edit',v);$('sbAiAsk').value='';}};
-  $('sbAiGo').addEventListener('click',go);
-  $('sbAiAsk').addEventListener('keydown',e=>{if(e.key==='Enter')go();});
-  // Improve becomes AI-first when an endpoint is configured
-  const btn=$('sbImproveBtn');
-  const fresh=btn.cloneNode(true); btn.parentNode.replaceChild(fresh,btn);
-  fresh.addEventListener('click',()=>sbAiRun('improve',''));
-  if(SB_AI.url)fresh.textContent='✨ Improve (AI)';
-})();
-/* targeted repairs respect AI protect zones */
-const _sbThickenAt=sbRepairThickenAt;
-sbRepairThickenAt=function(sim,prof,mmPerPx){
-  if(SB_AI.protect&&SB_AI.protect.length&&sbCut.result){
-    const orig=sbCut.result.issues;
-    const keep=orig.filter(i=>!SB_AI.protect.some(p=>Math.hypot(i.x-p.x,i.y-p.y)<p.r));
-    const saved=sbCut.result.issues; sbCut.result.issues=keep;
-    const n=_sbThickenAt(sim,prof,mmPerPx);
-    sbCut.result.issues=saved;
-    return n;
-  }
-  return _sbThickenAt(sim,prof,mmPerPx);
-};
-window.__sbAi={run:sbAiRun, setUrl:u=>{SB_AI.url=u;localStorage.setItem('sbAiUrl',u);},
-               state:SB_AI};
-
 </script>
 </body>
 </html>
