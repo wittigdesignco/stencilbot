@@ -53,7 +53,7 @@
   header h1 span{color:var(--accent);}
   header .tag{color:var(--dim); font-size:12px;}
   header .spacer{flex:1;}
-  .badge{
+  .badge{white-space:nowrap;
     padding:3px 10px; border-radius:999px; font-size:12px; font-weight:600;
     background:var(--panel2); border:1px solid var(--line); color:var(--dim);
   }
@@ -2297,8 +2297,9 @@ function updateStats(){
   const bi=$('badgeIslands'),bc=$('badgeConn');
   bi.textContent=nI===0?'no islands':`${nI} island${nI>1?'s':''}`;
   bi.className='badge '+(nI?'warn':'ok');
-  if(flo===0){bc.textContent=layers.length>1?'all layers hold together':'stencil holds together';bc.className='badge ok';}
-  else{bc.textContent=`${flo} piece${flo>1?'s':''} would fall out`;bc.className='badge bad';}
+  const compactHdr=window.innerWidth<=760;   // phones: short, never-wrapping pills
+  if(flo===0){bc.textContent=compactHdr?'\u2713 holds':(layers.length>1?'all layers hold together':'stencil holds together');bc.className='badge ok';}
+  else{bc.textContent=compactHdr?`${flo} loose!`:`${flo} piece${flo>1?'s':''} would fall out`;bc.className='badge bad';}
   if(state.w){
     const {awW,awH}=artPlaceMM();
     const u=$('unit').value, um=UNIT_MM[u];
@@ -3349,6 +3350,12 @@ function artPlaceMM(){
   const ty=ly/2+(+$('posY').value/100)*(ly/2);
   return {abW,abH,awW,awH,tx,ty};
 }
+let _sbHdrW=window.innerWidth;
+window.addEventListener('resize',()=>{
+  const w=window.innerWidth;
+  if((w<=760)!==(_sbHdrW<=760)){_sbHdrW=w;if(state.layers.length)updateStats();}
+  _sbHdrW=w;
+});
 let lastUnit='mm';
 $('unit').addEventListener('change',()=>{
   const u=$('unit').value;
