@@ -24,6 +24,7 @@
 <style>
 
 
+
   :root{
     /* Black liquid glass */
     --bg:#0a0a0c; --panel:rgba(255,255,255,0.06); --panel2:rgba(255,255,255,0.1);
@@ -425,7 +426,6 @@
   ::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.18); border:2px solid #101012;}
   ::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,0.3);}
 .canvaswrap.over{outline:2px dashed rgba(255,255,255,.45);outline-offset:-8px}
-
 /* ---------- Cutability panel ---------- */
 #gCutability .row2{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
 #gCutability label{font-size:11px;color:var(--muted,#9a9ab0);display:block}
@@ -459,6 +459,7 @@
   background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);color:inherit}
 .sb-ai-row input::placeholder{color:rgba(255,255,255,.35)}
 .sb-ai-row button{font-size:12px;padding:7px 14px}
+
 
 </style>
 </head>
@@ -554,6 +555,7 @@
       <div class="row"><label>Pattern <span class="info" data-tip="The mark style: parallel lines, classic dots, contour lines that bend around the form, or wavy squiggles.">i</span></label>
         <select id="htPattern">
           <option value="lines" selected>Lines</option>
+          <option value="nero">Weighted lines (portrait)</option>
           <option value="dots">Dots</option>
           <option value="contour">Contour (engraver)</option>
         </select>
@@ -761,6 +763,7 @@
 </footer>
 
 <script>
+
 
 /* ============================================================
    StencilBot Cutability™ engine — pure analysis, no DOM.
@@ -2861,6 +2864,34 @@ function htGenerate(){
     return;
   }
   HT.dots=null;
+  /* WEIGHTED LINES — the Nero technique. One continuous cut ribbon per rail
+     whose width IS the tone: fine pinstripes survive through highlights,
+     shadows fuse into solid-reading sections separated only by hairline
+     material webs that keep the sheet one piece. Coverage is pre-smoothed
+     ALONG the line direction so widths swell and taper like engraving. */
+  let neroCov=null, neroP=null;
+  if(P.pattern==='nero'){
+    const mmPP=(physWmm()||200)/w;
+    const raw=new Float32Array(w*h);
+    for(let y=0;y<h;y++)for(let x=0;x<w;x++)raw[y*w+x]=htCov(x,y);
+    neroCov=new Float32Array(w*h);
+    const taps=[-1,-0.66,-0.33,0,0.33,0.66,1];          // ±1 pitch along the rail
+    for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+      let sum=0,n=0;
+      for(const t of taps){
+        const sx=x+t*p*ca, sy=y+t*p*sa;
+        if(sx<0||sy<0||sx>=w-1||sy>=h-1)continue;
+        const x0=sx|0,y0=sy|0,fx=sx-x0,fy=sy-y0,i=y0*w+x0;
+        sum+=raw[i]*(1-fx)*(1-fy)+raw[i+1]*fx*(1-fy)+raw[i+w]*(1-fx)*fy+raw[i+w+1]*fx*fy;
+        n++;
+      }
+      neroCov[y*w+x]=n?sum/n:0;
+    }
+    neroP={
+      gMin: Math.max(P.wmin, 0.35/mmPP),                // finest pinstripe cut
+      hair: Math.max(0.5/mmPP, rib*0.5),                // hairline web in shadows
+    };
+  }
   const disp=(x,y)=>{
     // bilinear so the displacement field is smooth — a stepped field can
     // pinch the web band between rails on sharp-edged artwork
@@ -2877,6 +2908,24 @@ function htGenerate(){
       if(x<M||y<M||x>=w-M||y>=h-M)continue;
       if(bgm&&bgm[(y|0)*w+(x|0)])continue;   // background = solid sheet, never cut
       let on=false;
+      if(P.pattern==='nero'){
+        const xi=Math.min(w-1.001,Math.max(0,x)), yi=Math.min(h-1.001,Math.max(0,y));
+        const x0=xi|0,y0=yi|0,fx=xi-x0,fy=yi-y0,i0=y0*w+x0;
+        const c=neroCov[i0]*(1-fx)*(1-fy)+neroCov[i0+1]*fx*(1-fy)
+               +neroCov[i0+w]*(1-fx)*fy+neroCov[i0+w+1]*fx*fy;
+        if(c<=0.015)continue;
+        let u=(x-w/2)*nx+(y-h/2)*ny;
+        const f=u/p-Math.round(u/p);
+        const d=Math.abs(f)*p;
+        // mild S-curve → tonal "sections"; ink slider steers overall darkness
+        const cc=Math.min(1,Math.max(0,c*ink));
+        let cs=(cc*cc*(3-2*cc))*0.55+cc*0.45;
+        if(cc>0.72)cs=Math.min(1,cs+(cc-0.72)*1.3);   // shadows consolidate into sections
+        if(cc<0.06)cs*=0.5;                           // highlights stay airy
+        const cutW=neroP.gMin+(p-neroP.hair-neroP.gMin)*cs;
+        if(d<cutW/2)on=true;
+      }
+      else
       {
         // line / contour screen: per-pixel width modulation IS the
         // engraving look here, so lines keep continuous sampling
@@ -4587,8 +4636,6 @@ function sbImprove(){
 window.__sbCut={analyze:sbAnalyzeNow, get:()=>sbCut.result, improve:sbImprove,
                 set:(c,m)=>{sbCut.cutter=c;sbCut.material=m;
                             $('sbCutter').value=c;$('sbMaterial').value=m;sbRescore();}};
-
-
 /* ============================================================
    AI intelligence layer — plans from the stencilbot-ai Worker,
    executed by the existing repair machinery, score-gated so the
@@ -4733,6 +4780,7 @@ sbRepairThickenAt=function(sim,prof,mmPerPx){
 };
 window.__sbAi={run:sbAiRun, setUrl:u=>{SB_AI.url=u;localStorage.setItem('sbAiUrl',u);},
                state:SB_AI};
+
 
 </script>
 </body>
