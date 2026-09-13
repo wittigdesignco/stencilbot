@@ -490,6 +490,7 @@
         <button id="btnResetAll" class="ghost small">↺ Reset all</button>
       </div>
       <label class="toggle"><input type="checkbox" id="bgRemove"> Remove background</label>
+      <div id="bmBadge" class="hidden" style="margin-top:8px;padding:7px 10px;border-radius:8px;background:rgba(94,227,138,.09);border:1px solid rgba(94,227,138,.35);font-size:11.5px;line-height:1.5;color:#5ee38a"></div>
       <div class="row hidden" id="rowBgMode"><label>Method</label>
         <select id="bgMode"><option value="ai" selected>Smart AI</option><option value="flood">Color match</option></select>
       </div>
@@ -1867,12 +1868,6 @@ function processLayer(L,li,r,speck,multi){
   const clearMargin=()=>{for(let y=0;y<h;y++)for(let x=0;x<w;x++)
     if(x<M||y<M||x>=w-M||y>=h-M)cut[y*w+x]=0;};
   clearMargin();
-  if(r>0&&!multi){cut=blurSmooth(cut,w,h,r);}   // multi is smoothed jointly upstream
-  clearMargin();
-  if(speck>0){
-    const {labels:cl,comps:cc}=labelComponents(w,h,i=>cut[i]===1,false);
-    for(const c of cc)if(c.area<speck)fillComp(cut,cl,c,0,w,h);
-  }
   /* PRE-SCREENED IMPORT floor: the user's art is made of lines — lines
      thinner than a cutter can produce get THICKENED (never deleted).
      The material web keeps a protected spine so thickening can never
@@ -1881,18 +1876,27 @@ function processLayer(L,li,r,speck,multi){
     const mmPP=physWmm()?physWmm()/w:0.3;
     const fl=Math.max(1.5, 0.45/mmPP);               // min cut-line width, px
     const g=Math.max(1, Math.round(fl*0.5));         // growth radius
-    const opened=dilate(erode(cut,w,h,fl/2),w,h,fl/2+0.5);
+    const rr=Math.max(1, fl/2);                    // <1px erosion strips nothing
+    const opened=dilate(erode(cut,w,h,rr),w,h,rr+0.5);
     const thin=new Uint8Array(w*h);
     let nThin=0;
     for(let i=0;i<w*h;i++)if(cut[i]===1&&!opened[i]){thin[i]=1;nThin++;}
     if(nThin>12){
+      const {comps:tc}=labelComponents(w,h,i=>thin[i]===1,true);
+      state.bitmapThickened=tc.filter(c=>c.area>8).length;
       const mat=new Uint8Array(w*h);
       for(let i=0;i<w*h;i++)mat[i]=cut[i]?0:1;
       const spine=erode(mat,w,h,Math.max(1,(0.5/mmPP)/2));  // protected web core
       const grow=dilate(thin,w,h,g);
       for(let i=0;i<w*h;i++)if(grow[i]&&mat[i]&&!spine[i])cut[i]=1;
       clearMargin();
-    }
+    } else state.bitmapThickened=0;
+  }
+  if(r>0&&!multi){cut=blurSmooth(cut,w,h,r);}   // multi is smoothed jointly upstream
+  clearMargin();
+  if(speck>0){
+    const {labels:cl,comps:cc}=labelComponents(w,h,i=>cut[i]===1,false);
+    for(const c of cc)if(c.area<speck)fillComp(cut,cl,c,0,w,h);
   }
   /* physical floor: trim dead-end material tendrils thinner than any cutter
      can produce (~0.45 mm). A strand that CONNECTS two solid regions is a
@@ -2341,6 +2345,19 @@ function updateStats(){
   $('stFloating').textContent=flo;
   drawThreshHist();
   paintAllSliders();
+  {
+    const bb=$('bmBadge');
+    if(bb){
+      if(state.bitmapMode){
+        const th=state.bitmapThickened||0;
+        const br=layers.reduce((s,L)=>s+L.bridges.filter(b=>b.active).length,0);
+        bb.classList.remove('hidden');
+        bb.innerHTML='🔒 <b>Bitmap import — your art is preserved.</b><br>'
+          +(th?`${th} thin line${th>1?'s':''} thickened to cuttable width · `:'no lines needed thickening · ')
+          +`${br} bridge${br===1?'':'s'} added · tones locked (Smoothing still yours)`;
+      } else bb.classList.add('hidden');
+    }
+  }
   const bi=$('badgeIslands'),bc=$('badgeConn');
   bi.textContent=nI===0?'no islands':`${nI} island${nI>1?'s':''}`;
   bi.className='badge '+(nI?'warn':'ok');
