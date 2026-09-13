@@ -1068,8 +1068,28 @@ function setImage(img){
   state.img=c; state.w=w; state.h=h; state.rgb=rgb; state.gray=gray;
   $('view').style.display='block';
   const em=$('emptyMsg'); if(em)em.style.display='none';
+  /* PRE-SCREENED IMPORT: an upload that is already a bitmap (Photoshop
+     halftone, hand-drawn line art) is someone's finished ART. Detect it,
+     preserve it exactly — no re-thresholding tricks — and let the pipeline
+     do only physics: smooth the pixel stairs, thicken sub-cutter lines,
+     bridge, and score. */
+  {
+    // signature of finished 1-bit art (even after downscale antialiasing):
+    // extremes dominate and the histogram valley around mid-gray is empty
+    let blk=0,wht=0,mid=0;
+    for(let i=0;i<w*h;i++){const g=gray[i];
+      if(g<40)blk++; else if(g>215)wht++; else if(g>=100&&g<=155)mid++;}
+    const n=w*h, bf=blk/n, wf=wht/n, mf=mid/n;
+    state.bitmapMode=(bf+wf>=0.55 && mf<=0.04 && bf>=0.05 && wf>=0.05);
+  }
   state.otsu=otsu(gray);
-  if(!state.userTouchedThresh){$('thresh').value=state.otsu;$('threshV').textContent=state.otsu;}
+  if(state.bitmapMode){
+    $('thresh').value=128;$('threshV').textContent=128;
+    state.userTouchedThresh=true;                    // nobody re-tunes finished art
+    if(+$('smooth').value<1){$('smooth').value=1;$('smoothV')&&($('smoothV').textContent=1);}
+    setTimeout(()=>toast('Bitmap detected — imported as-is. Stencil Bot will only smooth, thicken and bridge to make it cuttable.'),300);
+  }
+  else if(!state.userTouchedThresh){$('thresh').value=state.otsu;$('threshV').textContent=state.otsu;}
   state.manualByLayer={}; state.nextBridgeId=1; state.active=0;
   _bgCache=null;
   state.aiMask=null; state.aiMaskStatus='none';
@@ -1852,6 +1872,27 @@ function processLayer(L,li,r,speck,multi){
   if(speck>0){
     const {labels:cl,comps:cc}=labelComponents(w,h,i=>cut[i]===1,false);
     for(const c of cc)if(c.area<speck)fillComp(cut,cl,c,0,w,h);
+  }
+  /* PRE-SCREENED IMPORT floor: the user's art is made of lines — lines
+     thinner than a cutter can produce get THICKENED (never deleted).
+     The material web keeps a protected spine so thickening can never
+     sever what holds the sheet together. */
+  if(state.bitmapMode&&!multi){
+    const mmPP=physWmm()?physWmm()/w:0.3;
+    const fl=Math.max(1.5, 0.45/mmPP);               // min cut-line width, px
+    const g=Math.max(1, Math.round(fl*0.5));         // growth radius
+    const opened=dilate(erode(cut,w,h,fl/2),w,h,fl/2+0.5);
+    const thin=new Uint8Array(w*h);
+    let nThin=0;
+    for(let i=0;i<w*h;i++)if(cut[i]===1&&!opened[i]){thin[i]=1;nThin++;}
+    if(nThin>12){
+      const mat=new Uint8Array(w*h);
+      for(let i=0;i<w*h;i++)mat[i]=cut[i]?0:1;
+      const spine=erode(mat,w,h,Math.max(1,(0.5/mmPP)/2));  // protected web core
+      const grow=dilate(thin,w,h,g);
+      for(let i=0;i<w*h;i++)if(grow[i]&&mat[i]&&!spine[i])cut[i]=1;
+      clearMargin();
+    }
   }
   /* physical floor: trim dead-end material tendrils thinner than any cutter
      can produce (~0.45 mm). A strand that CONNECTS two solid regions is a
@@ -3224,6 +3265,7 @@ $('lvGamma').addEventListener('input',()=>{
    clip the histogram tails hard (poster punch), then set gamma so the
    tonal median lands mid-scale — shadows read as shapes, highlights open up */
 function optimizeLevels(){
+  if(state.bitmapMode){toast('Bitmap import — your tones are locked. Use Smoothing and ✨ Improve for cuttability.');return;}
   if(!state.gray)return toast('Load an image first.');
   toast('✦ Analyzing the photo — test-driving levels…',9000);
   setTimeout(()=>{
