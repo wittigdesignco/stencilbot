@@ -554,8 +554,8 @@
       <div class="note">Analyzes your photo, then test-drives dozens of slider combinations — scoring each for tone fidelity, detail, clean highlights and dense shadows — and sets every tonal slider to the winner. Angle, pattern and rib stay yours.</div>
       <div class="row"><label>Pattern <span class="info" data-tip="The mark style: parallel lines, classic dots, contour lines that bend around the form, or wavy squiggles.">i</span></label>
         <select id="htPattern">
-          <option value="lines" selected>Lines</option>
-          <option value="nero">Weighted lines (portrait)</option>
+          <option value="lines">Lines (classic)</option>
+          <option value="nero" selected>Portrait lines (smooth)</option>
           <option value="dots">Dots</option>
           <option value="contour">Contour (engraver)</option>
         </select>
@@ -564,7 +564,7 @@
       <div class="row"><label>Pitch <span class="info" data-tip="Spacing between line centers (the screen frequency). Smaller = finer and more detailed; the readout under the preview shows it in real mm.">i</span></label><input type="range" id="htPitch" min="5" max="48" step="0.5" value="12"><span class="val" id="htPitchV">12</span></div>
       <div class="row"><label>Angle <span class="info" data-tip="Direction of the lines or dot grid. 45° is the classic screen angle; 60–75° flatters portraits.">i</span></label><input type="range" id="htAngle2" min="0" max="90" step="1" value="0"><span class="val" id="htAngle2V">0°</span></div>
       <div class="row"><label>Rib (web) <span class="info" data-tip="The strip of stencil material always kept between cuts so the sheet stays one piece. Bigger = stronger stencil but lower maximum darkness.">i</span></label><input type="range" id="htRib" min="1.5" max="8" step="0.5" value="2"><span class="val" id="htRibV">2</span></div>
-      <div class="row hidden" id="rowDepth"><label>Contour depth <span class="info" data-tip="How much the lines bend around the light and dark forms of the image.">i</span></label><input type="range" id="htDepth" min="0" max="60" step="2" value="35"><span class="val" id="htDepthV">35</span></div>
+      <div class="row" id="rowDepth"><label>Form curve <span class="info" data-tip="How much the lines bend around the light and dark forms of the image.">i</span></label><input type="range" id="htDepth" min="0" max="60" step="2" value="35"><span class="val" id="htDepthV">35</span></div>
       <div class="row"><label>Detail <span class="info" data-tip="Flare strength: how hard the line width reacts to local features. Eyebrows, nostrils and edges bulge into sharp engraved spindles.">i</span></label><input type="range" id="htDetail" min="0" max="100" step="2" value="60"><span class="val" id="htDetailV">60</span></div>
       <div class="row"><label>Flare size <span class="info" data-tip="How wide an area each flare reacts to, as a multiple of the pitch. Small = crisp local detail; large = soft broad swells.">i</span></label><input type="range" id="htFlare" min="30" max="300" step="10" value="100"><span class="val" id="htFlareV">1.0×</span></div>
       <div class="row"><label>Min line <span class="info" data-tip="Thinnest allowed line. Anything thinner drops out to clean paper instead of leaving fragile slivers.">i</span></label><input type="range" id="htWmin" min="0.6" max="4" step="0.1" value="1.2"><span class="val" id="htWminV">1.2</span></div>
@@ -2824,7 +2824,7 @@ function htGenerate(){
   const rad2=((P.ang+90)%180)*Math.PI/180;
   const nx2=-Math.sin(rad2), ny2=Math.cos(rad2);
   const ca=Math.cos(rad), sa=Math.sin(rad);
-  const amp=(P.pattern==='contour'?P.depth:0)*p;
+  const amp=(P.pattern==='contour'?P.depth:(P.pattern==='nero'?P.depth*0.55:0))*p;   // portrait lines bow around forms
   const rmax=(p-rib)/2, minDotR=Math.max(0.8,rib*0.25);
   const M=HT_MARGIN;
   const mask=new Uint8Array(W*H);
@@ -2871,13 +2871,35 @@ function htGenerate(){
      shadows fuse into solid-reading sections separated only by hairline
      material webs that keep the sheet one piece. Coverage is pre-smoothed
      ALONG the line direction so widths swell and taper like engraving. */
-  let neroP=null;
+  let neroP=null, neroCov=null;
   if(P.pattern==='nero'){
     const mmPP=(physWmm()||200)/w;
     neroP={
       gMin: Math.max(P.wmin, 0.35/mmPP),   // thinnest cut line worth cutting
       hair: Math.max(0.5/mmPP, rib*0.5),   // hairline web that keeps one piece
     };
+    /* the secret ingredient of the Photoshop recipe: a LIGHT gaussian on the
+       grayscale before the screen. Kills sensor/JPEG grit so ribbon widths
+       swell smoothly, small enough that eyes and lips survive untouched.
+       A whisper of along-rail smoothing melts the residual beading. */
+    const savedDet=_htTone.detail; _htTone.detail=0;   // flare = noise here
+    const raw=new Float32Array(w*h);
+    for(let y=0;y<h;y++)for(let x=0;x<w;x++)raw[y*w+x]=htCov(x,y);
+    _htTone.detail=savedDet;
+    const iso=boxBlurFloat(raw.slice(),w,h,[Math.max(1,Math.round(p*0.15))]);
+    neroCov=new Float32Array(w*h);
+    const taps=[-0.4,-0.2,0,0.2,0.4];
+    for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+      let sum=0,n=0;
+      for(const t of taps){
+        const sx=x+t*p*ca, sy=y+t*p*sa;
+        if(sx<0||sy<0||sx>=w-1||sy>=h-1)continue;
+        const x0=sx|0,y0=sy|0,fx=sx-x0,fy=sy-y0,i=y0*w+x0;
+        sum+=iso[i]*(1-fx)*(1-fy)+iso[i+1]*fx*(1-fy)+iso[i+w]*(1-fx)*fy+iso[i+w+1]*fx*fy;
+        n++;
+      }
+      neroCov[y*w+x]=n?sum/n:0;
+    }
   }
   const disp=(x,y)=>{
     // bilinear so the displacement field is smooth — a stepped field can
@@ -2901,10 +2923,14 @@ function htGenerate(){
            pixel — no smoothing, no channels. Every eyelash carves the
            ribbon edge directly. Floors keep it cuttable; Vinyl mode
            drops them for the exact PS output (backing holds islands). */
-        const c=htCov(x,y);
+        const xi=Math.min(w-1.001,Math.max(0,x)), yi=Math.min(h-1.001,Math.max(0,y));
+        const x0=xi|0,y0=yi|0,fx=xi-x0,fy=yi-y0,i0=y0*w+x0;
+        const c=neroCov[i0]*(1-fx)*(1-fy)+neroCov[i0+1]*fx*(1-fy)
+               +neroCov[i0+w]*(1-fx)*fy+neroCov[i0+w+1]*fx*fy;
         const cw=Math.min(P.vinyl?p:(p-neroP.hair), c*ink*p);
         if(cw>=neroP.gMin*0.8){
           let u=(x-w/2)*nx+(y-h/2)*ny;
+          if(amp)u-=disp(x,y);                       // curves follow shadow & light
           const f=u/p-Math.round(u/p);
           const d=Math.abs(f)*p;
           const dw=(0.5-Math.abs(f))*p;
@@ -2988,28 +3014,27 @@ function htMaskCanvas(colHex){
 }
 function renderHalftone(){
   if(!state.w)return;
-  const view=$('view');view.width=state.w;view.height=state.h;
+  if(HT.dirty)htGenerate();
+  /* preview at the MASK's native resolution — the supersampled detail
+     reaches the screen, so zooming reveals smooth ribbons, not pixels */
+  const RS=(HT.mask&&HT.S)?HT.S:2;
+  const view=$('view');view.width=state.w*RS;view.height=state.h*RS;
   const ctx=view.getContext('2d');
   const go=()=>{
     if(HT.dirty)htGenerate();
     const painted=$('htPainted').checked;
     ctx.fillStyle=painted?$('wallCol').value:'#f5f2ea';
-    ctx.fillRect(0,0,state.w,state.h);
+    ctx.fillRect(0,0,view.width,view.height);
     ctx.imageSmoothingEnabled=true;
     ctx.imageSmoothingQuality='high';
-    if(HT.dots){ // perfect circles: anti-aliased vector arcs at 2× supersample
-      const SS=2, oc=document.createElement('canvas');
-      oc.width=state.w*SS; oc.height=state.h*SS;
-      const ox=oc.getContext('2d');
-      ox.fillStyle=painted?$('wallCol').value:'#f5f2ea';
-      ox.fillRect(0,0,oc.width,oc.height);
-      ox.fillStyle=painted?$('paintCol').value:'#111113';
+    if(HT.dots){ // perfect circles: anti-aliased vector arcs at full preview res
+      ctx.fillStyle=painted?$('paintCol').value:'#111113';
       for(const[dx,dy,r]of HT.dots){
-        ox.beginPath(); ox.arc(dx*SS,dy*SS,r*SS,0,7); ox.fill();
+        ctx.beginPath(); ctx.arc(dx*RS,dy*RS,r*RS,0,7); ctx.fill();
       }
-      ctx.drawImage(oc,0,0,state.w,state.h);
     }else{
-      ctx.drawImage(htMaskCanvas(painted?$('paintCol').value:'#111113'),0,0,state.w,state.h);
+      // when RS matches the mask scale this is a 1:1 blit — zero resampling
+      ctx.drawImage(htMaskCanvas(painted?$('paintCol').value:'#111113'),0,0,view.width,view.height);
     }
     if(HT.floatMap&&!HT.dots){ // paint genuinely-stranded paper pieces danger-red
       const {W,H}=HT, fc=document.createElement('canvas');fc.width=W;fc.height=H;
@@ -3017,7 +3042,7 @@ function renderHalftone(){
       for(let i=0,j=0;i<W*H;i++,j+=4)
         if(HT.floatMap[i]){fi.data[j]=255;fi.data[j+1]=45;fi.data[j+2]=85;fi.data[j+3]=235;}
       fx.putImageData(fi,0,0);
-      ctx.drawImage(fc,0,0,state.w,state.h);
+      ctx.drawImage(fc,0,0,view.width,view.height);
     }
     $('htStatus').textContent=HT.floating===0?'✓ one piece, no bridges needed':`⚠ ${HT.floating} stranded piece${HT.floating>1?'s':''} — shown in red`;
     $('htStatus').style.color=HT.floating===0?'var(--ok)':'var(--danger)';
@@ -3766,7 +3791,7 @@ $('htOpt').addEventListener('click',optimizeHalftone);
 $('htPattern').addEventListener('change',()=>{
   const pt=$('htPattern').value;
   $('rowCross').classList.toggle('hidden',pt==='dots');
-  $('rowDepth').classList.toggle('hidden',pt!=='contour');
+  $('rowDepth').classList.toggle('hidden',pt!=='contour'&&pt!=='nero');
   htMarkDirty();
 });
 $('htCross').addEventListener('change',htMarkDirty);
@@ -4171,7 +4196,7 @@ function resetAll(){
     bgRemove:false,htCross:false,htPainted:false,htInvert:false};
   for(const[id,v]of Object.entries(checks))$(id).checked=v;
   $('bmode').value='stable';$('tinymode').value='remove';$('abPreset').value='custom';$('pieceScaleV').textContent='90%';$('posXV').textContent='0';$('posYV').textContent='0';
-  $('sepMode').value='tones';$('htPattern').value='lines';
+  $('sepMode').value='tones';$('htPattern').value='nero';
   $('paintCol').value='#111111';$('wallCol').value='#d9d2c4';
   $('rowBgTol').classList.add('hidden');$('bgNote').classList.add('hidden');
   $('rowDepth').classList.add('hidden');$('rowCross').classList.remove('hidden');
@@ -4404,7 +4429,7 @@ function sbZoomTo(iss){
 const _sbRender=render;
 render=function(){
   _sbRender();
-  if(!sbCut.view||!sbCut.result||state.tab==='orig')return;
+  if(!sbCut.view||!sbCut.result||state.tab==='orig'||state.tab==='ht')return;
   const ctx=$('view').getContext('2d');
   const rad=Math.max(10,state.w*0.02);
   for(const iss of sbCut.result.issues){
