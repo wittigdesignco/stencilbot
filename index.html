@@ -562,6 +562,7 @@
         </select>
       </div>
       <label class="toggle" id="rowVinyl"><input type="checkbox" id="htVinyl"> Vinyl mode <span class="info" data-tip="For adhesive-backed material (vinyl, stencil film on transfer tape): drops the hairline webs and lets shadows fuse solid and highlights go clean, exactly like Photoshop's halftone line screen. The backing holds the loose pieces until you weed.">i</span></label>
+      <div class="row" id="rowBmClean" style="display:none"><label>Cleanup <span class="info" data-tip="Bitmap imports only: heals ragged edges, closes pinholes and drops scan specks — stronger to the right. 0 = your file passed through mark for mark. It can heal strokes but never erase them.">i</span></label><input type="range" id="htBmClean" min="0" max="10" step="0.5" value="0"><span class="val" id="htBmCleanV">0</span></div>
       <div class="row"><label>Pitch <span class="info" data-tip="Spacing between line centers (the screen frequency). Smaller = finer and more detailed; the readout under the preview shows it in real mm.">i</span></label><input type="range" id="htPitch" min="5" max="48" step="0.5" value="12"><span class="val" id="htPitchV">12</span></div>
       <div class="row"><label>Angle <span class="info" data-tip="Direction of the lines or dot grid. 45° is the classic screen angle; 60–75° flatters portraits.">i</span></label><input type="range" id="htAngle2" min="0" max="90" step="1" value="0"><span class="val" id="htAngle2V">0°</span></div>
       <div class="row"><label>Rib (web) <span class="info" data-tip="The strip of stencil material always kept between cuts so the sheet stays one piece. Bigger = stronger stencil but lower maximum darkness.">i</span></label><input type="range" id="htRib" min="1.5" max="8" step="0.5" value="2"><span class="val" id="htRibV">2</span></div>
@@ -1091,6 +1092,10 @@ function setImage(img){
     setTimeout(()=>toast('Bitmap detected — imported as-is. Stencil Bot will only smooth, thicken and bridge to make it cuttable.'),300);
   }
   else if(!state.userTouchedThresh){$('thresh').value=state.otsu;$('threshV').textContent=state.otsu;}
+  {const rb=document.getElementById('rowBmClean');
+   if(rb){rb.style.display=state.bitmapMode?'':'none';
+     const c=document.getElementById('htBmClean');
+     if(c){c.value=0;document.getElementById('htBmCleanV').textContent='0';}}}
   state.manualByLayer={}; state.nextBridgeId=1; state.active=0;
   _bgCache=null;
   state.aiMask=null; state.aiMaskStatus='none';
@@ -2635,6 +2640,7 @@ function htParams(){
           sh:(+$('htSh').value)/100,
           gamma:(+$('htGamma').value)/100,
           vinyl:!!(document.getElementById('htVinyl')&&document.getElementById('htVinyl').checked),
+          clean:+((document.getElementById('htBmClean')||{}).value||0),
           denoise:(+$('htDenoise').value)/10,
           inv:$('htInvert').checked};
 }
@@ -2879,7 +2885,7 @@ function optimizeHalftone(){
 function htGenerateBitmap(P){
   const {w,h}=state;
   const S=2, W=w*S, H=h*S;
-  const mask=new Uint8Array(W*H);
+  let mask=new Uint8Array(W*H);
   const g=state.gray, inv=P.inv, M=HT_MARGIN;
   const bgm=$('bgRemove').checked?getBgMask():null;
   for(let Y=0;Y<H;Y++){
@@ -2894,6 +2900,13 @@ function htGenerateBitmap(P){
       if(inv?t>=128:t<128)mask[Y*W+X]=1;
     }
   }
+  /* CLEANUP slider — scanned or exported bitmaps arrive with noise:
+     ragged stair edges, pinholes, stray specks. 0 = untouched, mark for
+     mark. Right = stronger: close pinholes and hairline gaps first,
+     polish edges only AFTER the width floor guarantees no stroke is
+     thin enough to die — cleanup can heal, it can never erase. */
+  const clean=P.clean||0;
+  if(clean>0)mask=morphClose(mask,W,H,clean*0.3);
   // cuttability floor — same physics as the stencil-sheet import pass
   const mmPP=(physWmm()||200)/W;
   const fl=Math.max(1.5,0.45/mmPP);
@@ -2916,28 +2929,79 @@ function htGenerateBitmap(P){
     }
   }
   HT.bitmapThickened=thick;
-  // remove unprintable ink specks
-  const minArea=Math.max(4,Math.pow(P.rib*S*0.7,2));
+  if(clean>0)mask=blurSmooth(mask,W,H,Math.min(2.5,clean*0.25));  // polish AFTER the floor
+  // remove unprintable ink specks (cleanup raises the bar)
+  const minArea=Math.max(4,Math.pow(P.rib*S*0.7,2))*(1+clean*clean*0.5);
   {
     const {labels,comps}=labelComponents(W,H,i=>mask[i]===1,false);
     for(const cc of comps)if(cc.area<minArea)fillComp(mask,labels,cc,0,W,H);
   }
   HT.dots=null; HT.mask=mask; HT.W=W; HT.H=H; HT.S=S;
+  HT.webBridges=0;
   if(P.vinyl){
     HT.floating=0; HT.floatMap=null;      // backing sheet holds every piece
   }else{
-    const {labels:kl,comps:kc}=labelComponents(W,H,i=>mask[i]===0,true);
-    let floats=kc.filter(cc=>!cc.border);
+    /* SHEET MODE: pre-screened art has no material webs of its own —
+       every enclosed stroke would drop out of a cut sheet. Physics is
+       non-negotiable here, so each stranded piece gets tied back to the
+       sheet by the SHORTEST possible hairline web, carved through the
+       cut along the straightest route home. Tiny flakes fold into the
+       cut (they were falling out anyway). Anything still loose after
+       bridging is painted red. */
     const flakeMax=Math.max(64,Math.pow(P.rib*S*2.5,2));
-    for(const cc of floats)if(cc.area<flakeMax)fillComp(mask,kl,cc,1,W,H);
-    floats=floats.filter(cc=>cc.area>=flakeMax);
-    HT.floating=floats.length;
-    HT.floatMap=null;
-    if(floats.length){
-      const ids=new Set(floats.map(cc=>cc.id));
-      const fm=new Uint8Array(W*H);
-      for(let i=0;i<W*H;i++)if(mask[i]===0&&ids.has(kl[i]))fm[i]=1;
-      HT.floatMap=fm;
+    const wb=Math.max(2, 0.6/mmPP, P.rib*S*0.5);        // web width, px
+    const clearDisk=(cx,cy,r)=>{
+      const r2=r*r, x0=Math.max(0,Math.floor(cx-r)), x1=Math.min(W-1,Math.ceil(cx+r));
+      const y0=Math.max(0,Math.floor(cy-r)), y1=Math.min(H-1,Math.ceil(cy+r));
+      for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++)
+        if((x-cx)*(x-cx)+(y-cy)*(y-cy)<=r2)mask[y*W+x]=0;
+    };
+    let guard=0;
+    for(;;){
+      const {labels:kl,comps:kc}=labelComponents(W,H,i=>mask[i]===0,true);
+      let floats=kc.filter(cc=>!cc.border);
+      for(const cc of floats)if(cc.area<flakeMax)fillComp(mask,kl,cc,1,W,H);
+      floats=floats.filter(cc=>cc.area>=flakeMax);
+      if(!floats.length||guard++>=3){
+        HT.floating=floats.length;
+        HT.floatMap=null;
+        if(floats.length){
+          const ids=new Set(floats.map(cc=>cc.id));
+          const fm=new Uint8Array(W*H);
+          for(let i=0;i<W*H;i++)if(mask[i]===0&&ids.has(kl[i]))fm[i]=1;
+          HT.floatMap=fm;
+        }
+        break;
+      }
+      // distance field measured FROM grounded material — descending it
+      // is the shortest walk home for every stranded piece
+      const gnd=new Uint8Array(W*H);
+      const gids=new Set(kc.filter(cc=>cc.border).map(cc=>cc.id));
+      for(let i=0;i<W*H;i++)if(mask[i]===0&&gids.has(kl[i]))gnd[i]=1;
+      const df=chamferDT(gnd,W,H);
+      for(const cc of floats){
+        let best=-1,bd=Infinity;
+        for(let y=cc.minY;y<=cc.maxY;y++)for(let x=cc.minX;x<=cc.maxX;x++){
+          const i=y*W+x;
+          if(kl[i]===cc.id&&mask[i]===0&&df[i]<bd){bd=df[i];best=i;}
+        }
+        if(best<0)continue;
+        let cx=best%W, cy=(best/W)|0, steps=0;
+        while(steps++<W+H){
+          clearDisk(cx,cy,wb/2);
+          if(gnd[cy*W+cx])break;
+          let nb=-1,nv=df[cy*W+cx];
+          for(const[dx,dy]of[[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]]){
+            const nx2=cx+dx,ny2=cy+dy;
+            if(nx2<0||ny2<0||nx2>=W||ny2>=H)continue;
+            const v=df[ny2*W+nx2];
+            if(v<nv){nv=v;nb=ny2*W+nx2;}
+          }
+          if(nb<0)break;
+          cx=nb%W; cy=(nb/W)|0;
+        }
+        HT.webBridges++;
+      }
     }
   }
   HT.marks=0; for(let i=0;i<W*H;i++)HT.marks+=mask[i];
@@ -3189,8 +3253,10 @@ function renderHalftone(){
     const vinylOn=document.getElementById('htVinyl')&&document.getElementById('htVinyl').checked;
     if(state.bitmapMode){
       const t=HT.bitmapThickened|0;
-      $('htStatus').textContent='✓ bitmap passthrough — your art, mark for mark'
-        +(t?` · ${t} thin stroke${t>1?'s':''} thickened to cut`:'')
+      const b=HT.webBridges|0;
+      $('htStatus').textContent='✓ bitmap passthrough — mark for mark'
+        +(t?` · ${t} stroke${t>1?'s':''} thickened`:'')
+        +(b?` · ${b} hairline web${b>1?'s':''} keep it one piece`:'')
         +(vinylOn?' · backing holds every piece':'');
     }else{
       $('htStatus').textContent=vinylOn?'✓ vinyl mode — the backing sheet holds every piece until you weed'
@@ -3928,7 +3994,7 @@ updateSidebar();
     htHi:v=>v+'%', htSh:v=>v+'%',
     htGamma:v=>(v/100).toFixed(2), htDenoise:v=>(v/10).toFixed(1),
   };
-  for(const id of['htPitch','htAngle2','htRib','htDepth','htDetail','htWmin','htInk','htFlare','htHi','htSh','htGamma','htDenoise']){
+  for(const id of['htPitch','htAngle2','htRib','htDepth','htDetail','htWmin','htInk','htFlare','htHi','htSh','htGamma','htDenoise','htBmClean']){
     $(id).addEventListener('input',()=>{
       $(id+'V').textContent=(fmt[id]||String)($(id).value);
       clearTimeout(window._htT);window._htT=setTimeout(htMarkDirty,220);
