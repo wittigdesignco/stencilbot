@@ -2728,6 +2728,7 @@ function optEnv(){
 
 function optimizeHalftone(){
   if(!state.gray)return toast('Load an image first.');
+  if(state.bitmapMode)return toast('Bitmap import — the studio passes your art through mark for mark. There is no screen to optimize.');
   toast('✦ Analyzing the photo — test-driving screen settings…',9000);
   setTimeout(()=>{
   const env=optEnv(), {SW,SH,sg,sm,cnt,pct,sc}=env;
@@ -2868,8 +2869,84 @@ function optimizeHalftone(){
     :'✦ Dialed in — this photo was already close to optimal.');
   },30);
 }
+/* BITMAP PASSTHROUGH — a pre-screened import is already art made of
+   marks. Laying our screen over the user's screen makes moiré banding,
+   never realism — so for bitmap imports the studio invents NOTHING:
+   your black IS the mask, verbatim. The only edits are the ones physics
+   demands: strokes thinner than a cutter can produce get thickened
+   (never deleted), unprintable specks drop, sheet integrity is checked.
+   Pitch / Angle / tone sliders don't apply — there is no screen. */
+function htGenerateBitmap(P){
+  const {w,h}=state;
+  const S=2, W=w*S, H=h*S;
+  const mask=new Uint8Array(W*H);
+  const g=state.gray, inv=P.inv, M=HT_MARGIN;
+  const bgm=$('bgRemove').checked?getBgMask():null;
+  for(let Y=0;Y<H;Y++){
+    const y=Y/S;
+    for(let X=0;X<W;X++){
+      const x=X/S;
+      if(x<M||y<M||x>=w-M||y>=h-M)continue;
+      if(bgm&&bgm[(y|0)*w+(x|0)])continue;
+      const xf=Math.min(w-1.001,x), yf=Math.min(h-1.001,y);
+      const x0=xf|0,y0=yf|0,fx=xf-x0,fy=yf-y0,i=y0*w+x0;
+      const t=g[i]*(1-fx)*(1-fy)+g[i+1]*fx*(1-fy)+g[i+w]*(1-fx)*fy+g[i+w+1]*fx*fy;
+      if(inv?t>=128:t<128)mask[Y*W+X]=1;
+    }
+  }
+  // cuttability floor — same physics as the stencil-sheet import pass
+  const mmPP=(physWmm()||200)/W;
+  const fl=Math.max(1.5,0.45/mmPP);
+  const gr=Math.max(1,Math.round(fl*0.5)), rr=Math.max(1,fl/2);
+  const opened=dilate(erode(mask,W,H,rr),W,H,rr+0.5);
+  const thin=new Uint8Array(W*H); let nThin=0;
+  for(let i=0;i<W*H;i++)if(mask[i]===1&&!opened[i]){thin[i]=1;nThin++;}
+  let thick=0;
+  if(nThin>12){
+    const {comps:tc}=labelComponents(W,H,i=>thin[i]===1,true);
+    thick=tc.filter(c=>c.area>8).length;
+    const mat=new Uint8Array(W*H);
+    for(let i=0;i<W*H;i++)mat[i]=mask[i]?0:1;
+    const grow=dilate(thin,W,H,gr);
+    if(P.vinyl){
+      for(let i=0;i<W*H;i++)if(grow[i]&&mat[i])mask[i]=1;   // backing holds all
+    }else{
+      const spine=erode(mat,W,H,Math.max(1,(0.5/mmPP)/2));  // protected web core
+      for(let i=0;i<W*H;i++)if(grow[i]&&mat[i]&&!spine[i])mask[i]=1;
+    }
+  }
+  HT.bitmapThickened=thick;
+  // remove unprintable ink specks
+  const minArea=Math.max(4,Math.pow(P.rib*S*0.7,2));
+  {
+    const {labels,comps}=labelComponents(W,H,i=>mask[i]===1,false);
+    for(const cc of comps)if(cc.area<minArea)fillComp(mask,labels,cc,0,W,H);
+  }
+  HT.dots=null; HT.mask=mask; HT.W=W; HT.H=H; HT.S=S;
+  if(P.vinyl){
+    HT.floating=0; HT.floatMap=null;      // backing sheet holds every piece
+  }else{
+    const {labels:kl,comps:kc}=labelComponents(W,H,i=>mask[i]===0,true);
+    let floats=kc.filter(cc=>!cc.border);
+    const flakeMax=Math.max(64,Math.pow(P.rib*S*2.5,2));
+    for(const cc of floats)if(cc.area<flakeMax)fillComp(mask,kl,cc,1,W,H);
+    floats=floats.filter(cc=>cc.area>=flakeMax);
+    HT.floating=floats.length;
+    HT.floatMap=null;
+    if(floats.length){
+      const ids=new Set(floats.map(cc=>cc.id));
+      const fm=new Uint8Array(W*H);
+      for(let i=0;i<W*H;i++)if(mask[i]===0&&ids.has(kl[i]))fm[i]=1;
+      HT.floatMap=fm;
+    }
+  }
+  HT.marks=0; for(let i=0;i<W*H;i++)HT.marks+=mask[i];
+  HT.dirty=false;
+}
 function htGenerate(){
   const P=htParams();
+  if(state.bitmapMode){htGenerateBitmap(P);return;}
+  HT.bitmapThickened=0;
   htPrepareTone(P);
   // fine screens need a finer raster or circles pixelate into squares
   const {w,h}=state;
@@ -2985,8 +3062,13 @@ function htGenerate(){
         const x0=xi|0,y0=yi|0,fx=xi-x0,fy=yi-y0,i0=y0*w+x0;
         const c=neroCov[i0]*(1-fx)*(1-fy)+neroCov[i0+1]*fx*(1-fy)
                +neroCov[i0+w]*(1-fx)*fy+neroCov[i0+w+1]*fx*fy;
-        const cw=Math.min(P.vinyl?p:(p-neroP.hair), c*ink*p);
-        if(cw>=neroP.gMin*0.8){
+        let cw=Math.min(P.vinyl?p:(p-neroP.hair), c*ink*p);
+        /* no hard dropout — a threshold strobes into dashes at fine pitch.
+           Vinyl: PS-style taper to nothing. Sheet: clamp thin lines UP to
+           the cuttable minimum until tone truly fades, then release. */
+        if(P.vinyl){ if(cw<0.6)cw=0; }
+        else if(cw<neroP.gMin){ cw = cw>=neroP.gMin*0.55 ? neroP.gMin : 0; }
+        if(cw>0){
           let u=(x-w/2)*nx+(y-h/2)*ny;
           if(amp)u-=disp(x,y);                       // curves follow shadow & light
           const f=u/p-Math.round(u/p);
@@ -3039,7 +3121,9 @@ function htGenerate(){
      them into the cut, which is what physics was going to do anyway.
      Anything BIG left floating is a real problem: counted, and painted
      red in the preview so you can see exactly where. */
-  {
+  if(P.vinyl){
+    HT.floating=0; HT.floatMap=null;      // backing sheet holds every piece
+  } else {
     const {labels:kl,comps:kc}=labelComponents(W,H,i=>mask[i]===0,true);
     let floats=kc.filter(cc=>!cc.border);
     const flakeMax=Math.max(64,Math.pow(rib*S*2.5,2));
@@ -3102,14 +3186,25 @@ function renderHalftone(){
       fx.putImageData(fi,0,0);
       ctx.drawImage(fc,0,0,view.width,view.height);
     }
-    $('htStatus').textContent=HT.floating===0?'✓ one piece, no bridges needed':`⚠ ${HT.floating} stranded piece${HT.floating>1?'s':''} — shown in red`;
+    const vinylOn=document.getElementById('htVinyl')&&document.getElementById('htVinyl').checked;
+    if(state.bitmapMode){
+      const t=HT.bitmapThickened|0;
+      $('htStatus').textContent='✓ bitmap passthrough — your art, mark for mark'
+        +(t?` · ${t} thin stroke${t>1?'s':''} thickened to cut`:'')
+        +(vinylOn?' · backing holds every piece':'');
+    }else{
+      $('htStatus').textContent=vinylOn?'✓ vinyl mode — the backing sheet holds every piece until you weed'
+        :(HT.floating===0?'✓ one piece, no bridges needed':`⚠ ${HT.floating} stranded piece${HT.floating>1?'s':''} — shown in red`);
+    }
     $('htStatus').style.color=HT.floating===0?'var(--ok)':'var(--danger)';
     // the top-right badge follows whichever sheet you're looking at
     const bc=$('badgeConn');
     if(HT.floating===0){bc.textContent='halftone holds together';bc.className='badge ok';}
     else{bc.textContent=`halftone: ${HT.floating} stranded (red)`;bc.className='badge bad';}
     const mm=(physWmm()/state.w*(+$('htPitch').value)).toFixed(1);
-    $('hint').textContent=`per-pixel screen · pitch ${mm} mm · scroll to zoom`;
+    $('hint').textContent=state.bitmapMode
+      ?'bitmap passthrough — no screen applied, your marks as drawn · scroll to zoom'
+      :`per-pixel screen · pitch ${mm} mm · scroll to zoom`;
   };
   if(HT.dirty){
     $('spin').classList.add('show');
