@@ -2943,11 +2943,13 @@ function htGenerateBitmap(P){
   }else{
     /* SHEET MODE: pre-screened art has no material webs of its own —
        every enclosed stroke would drop out of a cut sheet. Physics is
-       non-negotiable here, so each stranded piece gets tied back to the
-       sheet by the SHORTEST possible hairline web, carved through the
-       cut along the straightest route home. Tiny flakes fold into the
-       cut (they were falling out anyway). Anything still loose after
-       bridging is painted red. */
+       non-negotiable, but the tie should be the one a stencil artist
+       would cut: each loose piece reaches for its NEAREST NEIGHBORING
+       stroke with ONE short, straight hairline tab — perpendicular
+       between rails on a line screen, never a snaking path across the
+       art. Pieces chain: a tied piece anchors the next, pass by pass,
+       until everything reads to ground. Tiny flakes fold into the cut
+       (they were falling out anyway); anything still loose is red. */
     const flakeMax=Math.max(64,Math.pow(P.rib*S*2.5,2));
     const wb=Math.max(2, 0.6/mmPP, P.rib*S*0.5);        // web width, px
     const clearDisk=(cx,cy,r)=>{
@@ -2956,13 +2958,15 @@ function htGenerateBitmap(P){
       for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++)
         if((x-cx)*(x-cx)+(y-cy)*(y-cy)<=r2)mask[y*W+x]=0;
     };
+    const DIRS=[[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]];
+    let reach=Math.max(24,Math.round(12/mmPP));         // start short (~12 mm)…
     let guard=0;
     for(;;){
       const {labels:kl,comps:kc}=labelComponents(W,H,i=>mask[i]===0,true);
       let floats=kc.filter(cc=>!cc.border);
       for(const cc of floats)if(cc.area<flakeMax)fillComp(mask,kl,cc,1,W,H);
       floats=floats.filter(cc=>cc.area>=flakeMax);
-      if(!floats.length||guard++>=3){
+      if(!floats.length||guard++>=8){
         HT.floating=floats.length;
         HT.floatMap=null;
         if(floats.length){
@@ -2973,35 +2977,39 @@ function htGenerateBitmap(P){
         }
         break;
       }
-      // distance field measured FROM grounded material — descending it
-      // is the shortest walk home for every stranded piece
-      const gnd=new Uint8Array(W*H);
-      const gids=new Set(kc.filter(cc=>cc.border).map(cc=>cc.id));
-      for(let i=0;i<W*H;i++)if(mask[i]===0&&gids.has(kl[i]))gnd[i]=1;
-      const df=chamferDT(gnd,W,H);
+      let tied=0;
       for(const cc of floats){
-        let best=-1,bd=Infinity;
-        for(let y=cc.minY;y<=cc.maxY;y++)for(let x=cc.minX;x<=cc.maxX;x++){
+        let bx=-1,by=-1,bdx=0,bdy=0,blen=0,bcost=Infinity;
+        const x0b=Math.max(1,cc.minX), x1b=Math.min(W-2,cc.maxX);
+        const y0b=Math.max(1,cc.minY), y1b=Math.min(H-2,cc.maxY);
+        for(let y=y0b;y<=y1b;y++)for(let x=x0b;x<=x1b;x++){
           const i=y*W+x;
-          if(kl[i]===cc.id&&mask[i]===0&&df[i]<bd){bd=df[i];best=i;}
-        }
-        if(best<0)continue;
-        let cx=best%W, cy=(best/W)|0, steps=0;
-        while(steps++<W+H){
-          clearDisk(cx,cy,wb/2);
-          if(gnd[cy*W+cx])break;
-          let nb=-1,nv=df[cy*W+cx];
-          for(const[dx,dy]of[[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]]){
-            const nx2=cx+dx,ny2=cy+dy;
-            if(nx2<0||ny2<0||nx2>=W||ny2>=H)continue;
-            const v=df[ny2*W+nx2];
-            if(v<nv){nv=v;nb=ny2*W+nx2;}
+          if(kl[i]!==cc.id||mask[i]!==0)continue;
+          // boundary pixels only — a tie starts at the stroke's edge
+          if(!(mask[i-1]===1||mask[i+1]===1||mask[i-W]===1||mask[i+W]===1))continue;
+          for(const[dx,dy]of DIRS){
+            const step=(dx&&dy)?1.4142:1;
+            for(let k=1;k<=reach;k++){
+              if(k*step>=bcost)break;                    // can't beat the best tie
+              const nx2=x+dx*k, ny2=y+dy*k;
+              if(nx2<1||ny2<1||nx2>=W-1||ny2>=H-1)break;
+              const j=ny2*W+nx2;
+              if(mask[j]===0){
+                if(kl[j]!==cc.id){const cost=k*step;
+                  if(cost<bcost){bcost=cost;bx=x;by=y;bdx=dx;bdy=dy;blen=k;}}
+                break;                                   // hit material — stop
+              }
+            }
           }
-          if(nb<0)break;
-          cx=nb%W; cy=(nb/W)|0;
         }
-        HT.webBridges++;
+        if(bx>=0){
+          for(let k=0;k<=blen;k++)clearDisk(bx+bdx*k,by+bdy*k,wb/2);
+          HT.webBridges++; tied++;
+        }
       }
+      // …and only reach farther when nothing short exists — long ties are
+      // a last resort, never the default look
+      if(!tied){ if(reach<Math.max(W,H))reach*=2; else guard=999; }
     }
   }
   HT.marks=0; for(let i=0;i<W*H;i++)HT.marks+=mask[i];
